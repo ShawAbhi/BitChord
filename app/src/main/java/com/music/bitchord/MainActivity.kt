@@ -219,6 +219,7 @@ import com.music.bitchord.ui.components.QueueActionNotice
 import com.music.bitchord.ui.components.QueueActionNoticeHost
 import com.music.bitchord.ui.components.TopBarAccountButton
 import com.music.bitchord.ui.components.TopBarBlur
+import com.music.bitchord.ui.components.TopFadeBlur
 import com.music.bitchord.ui.components.TopBarDownloadButton
 import com.music.bitchord.ui.components.optimizedHazeEffect
 import com.music.bitchord.ui.components.topBarContentPadding
@@ -2969,6 +2970,16 @@ private fun BitChordApp(
                 val activeSourcesCount = com.music.bitchord.data.sources.SourceRegistry.configs.collectAsStateWithLifecycle().value.count { it.enabled }
                 val hasTabs = selectedTab == TAB_HOME && detail == null && libraryShowAll == null && !showSettings && !showAccountScrobbling && !showSources && !showListenTogether && !showEqualizer && !showReplay && !showDiscord && !showHistory && (1 + activeSourcesCount) > 1
 
+                val isReplayVisible = showReplay && !showDiscord && !showHistory &&
+                    !(libraryShowAll != null && detail == null) &&
+                    !showAccountScrobbling && !showSources && !showListenTogether &&
+                    !showEqualizer && !showSettings
+                val chromePageColor = if (isDetailVisible) {
+                    detailPalette.background
+                } else {
+                    MaterialTheme.colorScheme.background
+                }
+                
                 if (!isSearchVisible) TopFadeBlur(
                     hazeState = hazeState,
                     // Replay paints its own full-bleed black backdrop up under the

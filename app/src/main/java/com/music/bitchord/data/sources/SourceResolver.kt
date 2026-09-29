@@ -146,13 +146,6 @@ object SourceResolver {
         strict: Boolean = false,
     ): SourceStream? {
         val request = requestForNow()
-        if (strict) {
-            if (pinned != null) {
-                return attempt(pinned) { pinned.stream(trackId, request) }
-                    ?.copy(sourceConfigId = pinned.configId)
-            }
-            return null
-        }
 
         val active = SourceRegistry.activeForPlayback()
         // A pin identifies where the row originally came from; it does not
@@ -161,6 +154,14 @@ object SourceResolver {
         // Resolve the pin only from the enabled list so Off means off for both
         // newly matched tracks and source-backed rows queued earlier.
         val pinned = active.firstOrNull { it.configId == configId }
+
+        if (strict) {
+            if (pinned != null) {
+                return attempt(pinned) { pinned.stream(trackId, request) }
+                    ?.copy(sourceConfigId = pinned.configId)
+            }
+            return null
+        }
 
         // The upgrade path: with lossless asked for and the pinned source
         // unable to serve it, anything ranked above it that can is worth
