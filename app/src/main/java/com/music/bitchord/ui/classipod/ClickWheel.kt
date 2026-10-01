@@ -90,51 +90,75 @@ fun ClickWheel(
         val textWeight = FontWeight.Bold
 
         // Menu (Top)
-        Text(
-            text = "MENU",
-            color = textColor,
-            fontWeight = textWeight,
-            fontSize = 15.sp,
+        Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 22.dp)
-                .clickable { onClickMenu() }
-        )
+                .padding(top = 10.dp)
+                .size(60.dp)
+                .clip(CircleShape)
+                .clickable { onClickMenu() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "MENU",
+                color = textColor,
+                fontWeight = textWeight,
+                fontSize = 15.sp
+            )
+        }
 
         // Play/Pause (Bottom)
-        Text(
-            text = "⏯",
-            color = textColor,
-            fontWeight = textWeight,
-            fontSize = 18.sp,
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 22.dp)
-                .clickable { onClickPlayPause() }
-        )
+                .padding(bottom = 10.dp)
+                .size(60.dp)
+                .clip(CircleShape)
+                .clickable { onClickPlayPause() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "⏯",
+                color = textColor,
+                fontWeight = textWeight,
+                fontSize = 18.sp
+            )
+        }
 
         // Prev (Left)
-        Text(
-            text = "⏮",
-            color = textColor,
-            fontWeight = textWeight,
-            fontSize = 18.sp,
+        Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .padding(start = 22.dp)
-                .clickable { onClickPrev() }
-        )
+                .padding(start = 10.dp)
+                .size(60.dp)
+                .clip(CircleShape)
+                .clickable { onClickPrev() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "⏮",
+                color = textColor,
+                fontWeight = textWeight,
+                fontSize = 18.sp
+            )
+        }
 
         // Next (Right)
-        Text(
-            text = "⏭",
-            color = textColor,
-            fontWeight = textWeight,
-            fontSize = 18.sp,
+        Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(end = 22.dp)
-                .clickable { onClickNext() }
-        )
+                .padding(end = 10.dp)
+                .size(60.dp)
+                .clip(CircleShape)
+                .clickable { onClickNext() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "⏭",
+                color = textColor,
+                fontWeight = textWeight,
+                fontSize = 18.sp
+            )
+        }
     }
 }

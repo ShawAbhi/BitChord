@@ -26,18 +26,45 @@ fun ClassipodApp(
     val context = LocalContext.current
     val menuState = remember { PodMenuState() }
 
-    LaunchedEffect(Unit) {
-        menuState.pushMenu("iPod", listOf(
-            MenuItem("Now Playing", hasArrow = false) {
-                menuState.isNowPlaying.value = true
-            },
-            MenuItem("Play / Pause", hasArrow = false) {
-                if (playerState.isPlaying) controller?.pause() else controller?.play()
-            },
-            MenuItem("Exit", hasArrow = false) {
-                (context as? Activity)?.finish()
+    val rootItems = listOf(
+        MenuItem("Now Playing", hasArrow = false) {
+            menuState.isNowPlaying.value = true
+        },
+        MenuItem("Playlist", hasArrow = true) {
+            val queueItems = playerState.queue.mapIndexed { index, song ->
+                MenuItem(song.title.take(30) + if(song.title.length > 30) "..." else "", hasArrow = false) {
+                    controller?.seekToDefaultPosition(index)
+                    controller?.play()
+                    menuState.isNowPlaying.value = true
+                }
             }
-        ))
+            menuState.pushMenu("Playlist", queueItems.ifEmpty { listOf(MenuItem("Empty", false) {}) })
+        },
+        MenuItem("Next Song", hasArrow = false) {
+            controller?.seekToNext()
+        },
+        MenuItem("Previous Song", hasArrow = false) {
+            controller?.seekToPrevious()
+        },
+        MenuItem("Play / Pause", hasArrow = false) {
+            if (playerState.isPlaying) controller?.pause() else controller?.play()
+        },
+        MenuItem("Exit", hasArrow = false) {
+            (context as? Activity)?.finish()
+        }
+    )
+
+    LaunchedEffect(Unit) {
+        menuState.pushMenu("iPod", rootItems)
+    }
+
+    LaunchedEffect(playerState, rootItems) {
+        if (menuState.history.isEmpty() && menuState.title.value == "iPod") {
+            val oldIndex = menuState.selectedIndex.value
+            menuState.items.clear()
+            menuState.items.addAll(rootItems)
+            menuState.selectedIndex.value = oldIndex.coerceIn(0, (rootItems.size - 1).coerceAtLeast(0))
+        }
     }
 
     // Outer Body (Pure white minimalist style)
