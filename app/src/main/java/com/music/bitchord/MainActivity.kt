@@ -3344,6 +3344,36 @@ private fun BitChordApp(
                     )
                 }
             }
+            
+            // iPod FAB (Glass style matching the app)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 140.dp) // Sits above the MiniPlayer/NavBar
+                    .size(56.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .optimizedHazeEffect(
+                        state = hazeState,
+                        style = dev.chrisbanes.haze.materials.HazeMaterials.regular(androidx.compose.material3.MaterialTheme.colorScheme.surface),
+                    )
+                    .border(
+                        GLASS_EDGE_WIDTH, 
+                        GLASS_EDGE_COLOR, 
+                        androidx.compose.foundation.shape.CircleShape
+                    )
+                    .clickable {
+                        val intent = android.content.Intent(this@MainActivity, com.music.bitchord.ui.classipod.ClassipodActivity::class.java)
+                        startActivity(intent)
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.foundation.Image(
+                    painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon),
+                    contentDescription = "Open iPod",
+                    modifier = Modifier.size(28.dp),
+                    colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
+                )
+            }
 
         }
 
