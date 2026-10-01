@@ -16,7 +16,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -24,10 +26,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.res.painterResource
@@ -45,6 +49,9 @@ import com.music.bitchord.ui.theme.BitChordTheme
 import kotlin.math.roundToInt
 
 class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
+    companion object {
+        val isRunning = androidx.compose.runtime.mutableStateOf(false)
+    }
 
     private lateinit var windowManager: WindowManager
     private lateinit var composeView: ComposeView
@@ -68,6 +75,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
 
     override fun onCreate() {
         super.onCreate()
+        isRunning.value = true
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
@@ -142,18 +150,42 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                     }
 
                     if (!isExpanded) {
-                        // Collapsed Bubble with iPod icon
+                        // Collapsed Bubble styled like an adaptive app icon
+                        val isDark = isSystemInDarkTheme()
+                        val containerColor = if (isDark) {
+                            Color(0xFF202124) // Google / Material dark surface
+                        } else {
+                            Color.White
+                        }
+                        val borderColor = if (isDark) {
+                            Color(0x33FFFFFF)
+                        } else {
+                            Color(0x1F000000)
+                        }
+                        
                         Box(
                             modifier = Modifier
                                 .size(64.dp)
                                 .then(dragModifier)
+                                .shadow(
+                                    elevation = 6.dp,
+                                    shape = CircleShape,
+                                    clip = false
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = borderColor,
+                                    shape = CircleShape
+                                )
+                                .background(containerColor, CircleShape)
                                 .clickable { isExpanded = true },
                             contentAlignment = Alignment.Center
                         ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.ipod_icon),
+                            Icon(
+                                painter = painterResource(id = R.drawable.ipod_icon_white),
                                 contentDescription = "Pod",
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.size(34.dp),
+                                tint = if (isDark) Color.White else Color(0xFF1F1F1F)
                             )
                         }
                     } else {
@@ -228,6 +260,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
 
     override fun onDestroy() {
         super.onDestroy()
+        isRunning.value = false
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         if (::composeView.isInitialized) {
             windowManager.removeView(composeView)
