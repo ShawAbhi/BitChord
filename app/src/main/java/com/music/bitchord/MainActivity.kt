@@ -3333,7 +3333,7 @@ private fun BitChordApp(
                             androidx.compose.material3.Icon(
                                 painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon_white),
                                 contentDescription = "Open iPod",
-                                modifier = Modifier.size(32.dp),
+                                modifier = Modifier.size(22.dp),
                                 tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
                             )
                         }
@@ -3397,7 +3397,7 @@ private fun BitChordApp(
                             androidx.compose.material3.Icon(
                                 painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon_white),
                                 contentDescription = "Open iPod",
-                                modifier = Modifier.size(32.dp),
+                                modifier = Modifier.size(22.dp),
                                 tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
                             )
                         }
