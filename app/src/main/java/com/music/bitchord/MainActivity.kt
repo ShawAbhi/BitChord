@@ -26,6 +26,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -3343,37 +3344,40 @@ private fun BitChordApp(
                         onTabSelected = onTabSelected,
                     )
                 }
+                
+                // iPod FAB (Glass style matching the app)
+                val context = androidx.compose.ui.platform.LocalContext.current
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 150.dp) // Sits above the MiniPlayer/NavBar
+                        .size(56.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .optimizedHazeEffect(
+                            state = hazeState,
+                            style = dev.chrisbanes.haze.materials.HazeMaterials.regular(androidx.compose.material3.MaterialTheme.colorScheme.surface),
+                        )
+                        .border(
+                            com.music.bitchord.ui.components.GLASS_EDGE_WIDTH, 
+                            com.music.bitchord.ui.components.GLASS_EDGE_COLOR, 
+                            androidx.compose.foundation.shape.CircleShape
+                        )
+                        .clickable {
+                            val intent = android.content.Intent(context, com.music.bitchord.ui.classipod.ClassipodActivity::class.java)
+                            context.startActivity(intent)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon),
+                        contentDescription = "Open iPod",
+                        modifier = Modifier.size(28.dp),
+                        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
+                    )
+                }
             }
             
-            // iPod FAB (Glass style matching the app)
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 140.dp) // Sits above the MiniPlayer/NavBar
-                    .size(56.dp)
-                    .clip(androidx.compose.foundation.shape.CircleShape)
-                    .optimizedHazeEffect(
-                        state = hazeState,
-                        style = dev.chrisbanes.haze.materials.HazeMaterials.regular(androidx.compose.material3.MaterialTheme.colorScheme.surface),
-                    )
-                    .border(
-                        GLASS_EDGE_WIDTH, 
-                        GLASS_EDGE_COLOR, 
-                        androidx.compose.foundation.shape.CircleShape
-                    )
-                    .clickable {
-                        val intent = android.content.Intent(this@MainActivity, com.music.bitchord.ui.classipod.ClassipodActivity::class.java)
-                        startActivity(intent)
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                androidx.compose.foundation.Image(
-                    painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon),
-                    contentDescription = "Open iPod",
-                    modifier = Modifier.size(28.dp),
-                    colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
-                )
-            }
+
 
         }
 
