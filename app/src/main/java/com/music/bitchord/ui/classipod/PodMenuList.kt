@@ -27,9 +27,9 @@ fun PodMenuList(menuState: PodMenuState) {
         val itemsPerPage = 6 // Roughly 6 full items fit on this iPod screen height
         
         if (selectedIndex < firstVisible) {
-            listState.scrollToItem(selectedIndex) // Push list down
+            listState.animateScrollToItem(selectedIndex) // Push list down smoothly
         } else if (selectedIndex >= firstVisible + itemsPerPage) {
-            listState.scrollToItem(selectedIndex - itemsPerPage + 1) // Push list up
+            listState.animateScrollToItem(selectedIndex - itemsPerPage + 1) // Push list up smoothly
         }
     }
 
