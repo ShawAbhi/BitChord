@@ -77,6 +77,8 @@ fun PodNowPlaying(playerState: PlayerState, menuState: PodMenuState) {
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
+                val currentRenderPos = menuState.scrubPositionMs.value ?: playerState.position.positionMs
+                
                 // Pill progress bar
                 Box(
                     modifier = Modifier
@@ -86,7 +88,6 @@ fun PodNowPlaying(playerState: PlayerState, menuState: PodMenuState) {
                         .border(1.dp, Color(0xFF1E3A5F), RoundedCornerShape(7.dp))
                         .background(Color.Transparent)
                 ) {
-                    val currentRenderPos = menuState.scrubPositionMs.value ?: playerState.position.positionMs
                     val progress = if (playerState.durationMs > 0) {
                         currentRenderPos.toFloat() / playerState.durationMs.toFloat()
                     } else 0f
