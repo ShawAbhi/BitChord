@@ -55,7 +55,7 @@ fun PodScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Status Bar (Light metallic blue)
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
@@ -64,15 +64,32 @@ fun PodScreen(
                         )
                     )
                     .border(width = 1.dp, color = Color(0xFF1E3A5F))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
-                Text(text = if (playerState.isPlaying) "▶" else "||", fontSize = 11.sp, color = Color(0xFF1E3A5F), fontWeight = FontWeight.Bold)
-                Text(text = currentMenu.title.value, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = Color(0xFF1E3A5F))
+                // Play/Pause icon (Left)
+                Text(
+                    text = if (playerState.isPlaying) "▶" else "||", 
+                    fontSize = 11.sp, 
+                    color = Color(0xFF1E3A5F), 
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.CenterStart)
+                )
                 
-                // Battery icon
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Title (Center)
+                val displayTitle = if (currentMenu.isNowPlaying.value) "Now Playing" else currentMenu.title.value
+                Text(
+                    text = displayTitle, 
+                    fontWeight = FontWeight.ExtraBold, 
+                    fontSize = 14.sp, 
+                    color = Color(0xFF1E3A5F),
+                    modifier = Modifier.align(Alignment.Center)
+                )
+                
+                // Battery icon (Right)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                ) {
                     Box(modifier = Modifier.size(18.dp, 10.dp).border(1.dp, Color(0xFF1E3A5F)).padding(1.dp)) {
                         Box(modifier = Modifier.fillMaxSize().background(Color.Transparent)) {
                             Box(modifier = Modifier.fillMaxWidth(0.8f).fillMaxHeight().background(Color(0xFF1E3A5F)))
