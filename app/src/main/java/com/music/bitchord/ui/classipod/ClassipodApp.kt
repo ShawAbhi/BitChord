@@ -117,8 +117,13 @@ fun ClassipodApp(
                         }
                     },
                     onClickMenu = {
-                        // Toggle between Now Playing and Playlist
                         menuState.isNowPlaying.value = !menuState.isNowPlaying.value
+                        if (menuState.isScrubbingMode.value) {
+                            menuState.scrubPositionMs.value?.let { finalPos -> controller?.seekTo(finalPos) }
+                            controller?.play()
+                        }
+                        menuState.isScrubbingMode.value = false
+                        menuState.scrubPositionMs.value = null
                     },
                     onClickPlayPause = {
                         if (playerState.isPlaying) controller?.pause() else controller?.play()
@@ -131,10 +136,12 @@ fun ClassipodApp(
                         } else if (menuState.isNowPlaying.value) {
                             menuState.isScrubbingMode.value = !menuState.isScrubbingMode.value
                             if (menuState.isScrubbingMode.value) {
+                                controller?.pause()
                                 menuState.scrubPositionMs.value = playerState.position.positionMs
                             } else {
                                 // Exiting scrub mode: perform the final definitive seek
                                 menuState.scrubPositionMs.value?.let { finalPos -> controller?.seekTo(finalPos) }
+                                controller?.play()
                                 menuState.scrubPositionMs.value = null
                             }
                         }

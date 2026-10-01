@@ -30,6 +30,7 @@ fun ClickWheel(
     onClickCenter: () -> Unit
 ) {
     val view = LocalView.current
+    val currentOnScroll by rememberUpdatedState(onScroll)
     var lastAngle by remember { mutableStateOf(0f) }
     var accumulatedAngle by remember { mutableStateOf(0f) }
 
@@ -66,7 +67,7 @@ fun ClickWheel(
                         if (Math.abs(accumulatedAngle) > 15f) {
                             val ticks = (accumulatedAngle / 15f).toInt()
                             accumulatedAngle -= ticks * 15f
-                            if (onScroll(ticks)) {
+                            if (currentOnScroll(ticks)) {
                                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                             }
                         }
