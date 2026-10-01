@@ -39,10 +39,12 @@ class PodMenuState {
         return false
     }
 
-    fun scroll(ticks: Int) {
-        if (items.isEmpty()) return
-        val newIndex = selectedIndex.value + ticks
+    fun scroll(ticks: Int): Boolean {
+        if (items.isEmpty() || isNowPlaying.value) return false
+        val oldIndex = selectedIndex.value
+        val newIndex = oldIndex + ticks
         selectedIndex.value = newIndex.coerceIn(0, items.size - 1)
+        return oldIndex != selectedIndex.value
     }
 }
 

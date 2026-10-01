@@ -22,7 +22,7 @@ import kotlin.math.atan2
 
 @Composable
 fun ClickWheel(
-    onScroll: (Int) -> Unit,
+    onScroll: (Int) -> Boolean,
     onClickMenu: () -> Unit,
     onClickPlayPause: () -> Unit,
     onClickNext: () -> Unit,
@@ -66,8 +66,9 @@ fun ClickWheel(
                         if (Math.abs(accumulatedAngle) > 15f) {
                             val ticks = (accumulatedAngle / 15f).toInt()
                             accumulatedAngle -= ticks * 15f
-                            onScroll(ticks)
-                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            if (onScroll(ticks)) {
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            }
                         }
                     }
                 )
@@ -96,7 +97,10 @@ fun ClickWheel(
                 .padding(top = 10.dp)
                 .size(60.dp)
                 .clip(CircleShape)
-                .clickable { onClickMenu() },
+                .clickable { 
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    onClickMenu() 
+                },
             contentAlignment = Alignment.Center
         ) {
             Text(
@@ -114,7 +118,10 @@ fun ClickWheel(
                 .padding(bottom = 10.dp)
                 .size(60.dp)
                 .clip(CircleShape)
-                .clickable { onClickPlayPause() },
+                .clickable { 
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    onClickPlayPause() 
+                },
             contentAlignment = Alignment.Center
         ) {
             Text(
@@ -132,7 +139,10 @@ fun ClickWheel(
                 .padding(start = 10.dp)
                 .size(60.dp)
                 .clip(CircleShape)
-                .clickable { onClickPrev() },
+                .clickable { 
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    onClickPrev() 
+                },
             contentAlignment = Alignment.Center
         ) {
             Text(
@@ -150,7 +160,10 @@ fun ClickWheel(
                 .padding(end = 10.dp)
                 .size(60.dp)
                 .clip(CircleShape)
-                .clickable { onClickNext() },
+                .clickable { 
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    onClickNext() 
+                },
             contentAlignment = Alignment.Center
         ) {
             Text(

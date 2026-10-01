@@ -1,6 +1,7 @@
 package com.music.bitchord.ui.classipod
 
 import android.app.Activity
+import android.media.AudioManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -85,7 +86,22 @@ fun ClassipodApp(
                 contentAlignment = Alignment.TopCenter
             ) {
                 ClickWheel(
-                    onScroll = { ticks -> menuState.scroll(ticks) },
+                    onScroll = { ticks -> 
+                        if (menuState.isNowPlaying.value) {
+                            val audioManager = context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
+                            val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                            val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                            val newVol = (currentVol + ticks).coerceIn(0, maxVol)
+                            if (currentVol != newVol) {
+                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            menuState.scroll(ticks)
+                        }
+                    },
                     onClickMenu = {
                         // Toggle between Now Playing and Playlist
                         menuState.isNowPlaying.value = !menuState.isNowPlaying.value
