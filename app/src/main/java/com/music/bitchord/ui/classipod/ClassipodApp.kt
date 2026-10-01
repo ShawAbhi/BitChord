@@ -60,6 +60,25 @@ fun ClassipodApp(
             menuState.selectedIndex.value = oldIndex.coerceIn(0, (rootItems.size - 1).coerceAtLeast(0))
         }
     }
+    
+    // Live update the Playlist menu if they are currently looking at it
+    LaunchedEffect(playerState.queue) {
+        if (menuState.title.value == "Playlist") {
+            val queueItems = playerState.queue.mapIndexed { index, song ->
+                MenuItem(song.title.take(30) + if(song.title.length > 30) "..." else "", hasArrow = false) {
+                    controller?.seekToDefaultPosition(index)
+                    controller?.play()
+                    menuState.isNowPlaying.value = true
+                }
+            }
+            val newItems = queueItems.ifEmpty { listOf(MenuItem("Empty", false) {}) }
+            menuState.items.clear()
+            menuState.items.addAll(newItems)
+            
+            // Keep selection within bounds
+            menuState.selectedIndex.value = menuState.selectedIndex.value.coerceIn(0, (newItems.size - 1).coerceAtLeast(0))
+        }
+    }
 
     // Outer Body (Pure white minimalist style)
     Box(
