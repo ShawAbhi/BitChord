@@ -26,58 +26,25 @@ fun ClassipodApp(
     val context = LocalContext.current
     val menuState = remember { PodMenuState() }
 
-    val rootItems = listOf(
-        MenuItem("Now Playing", hasArrow = false) {
-            menuState.isNowPlaying.value = true
-        },
-        MenuItem("Playlist", hasArrow = true) {
-            val queueItems = playerState.queue.mapIndexed { index, song ->
-                MenuItem(song.title.take(30) + if(song.title.length > 30) "..." else "", hasArrow = false) {
-                    controller?.seekToDefaultPosition(index)
-                    controller?.play()
-                    menuState.isNowPlaying.value = true
-                }
-            }
-            menuState.pushMenu("Playlist", queueItems.ifEmpty { listOf(MenuItem("Empty", false) {}) })
-        },
-        MenuItem("Play / Pause", hasArrow = false) {
-            if (playerState.isPlaying) controller?.pause() else controller?.play()
-        },
-        MenuItem("Exit", hasArrow = false) {
-            (context as? Activity)?.finish()
-        }
-    )
-
-    LaunchedEffect(Unit) {
-        menuState.pushMenu("iPod", rootItems)
-    }
-
-    LaunchedEffect(playerState, rootItems) {
-        if (menuState.history.isEmpty() && menuState.title.value == "iPod") {
-            val oldIndex = menuState.selectedIndex.value
-            menuState.items.clear()
-            menuState.items.addAll(rootItems)
-            menuState.selectedIndex.value = oldIndex.coerceIn(0, (rootItems.size - 1).coerceAtLeast(0))
-        }
-    }
-    
-    // Live update the Playlist menu if they are currently looking at it
+    // Ensure we start with Playlist and update immediately
     LaunchedEffect(playerState.queue) {
-        if (menuState.title.value == "Playlist") {
-            val queueItems = playerState.queue.mapIndexed { index, song ->
-                MenuItem(song.title.take(30) + if(song.title.length > 30) "..." else "", hasArrow = false) {
-                    controller?.seekToDefaultPosition(index)
-                    controller?.play()
-                    menuState.isNowPlaying.value = true
-                }
+        menuState.title.value = "Playlist"
+        
+        val queueItems = playerState.queue.mapIndexed { index, song ->
+            MenuItem(song.title.take(30) + if(song.title.length > 30) "..." else "", hasArrow = false) {
+                controller?.seekToDefaultPosition(index)
+                controller?.play()
+                menuState.isNowPlaying.value = true
             }
-            val newItems = queueItems.ifEmpty { listOf(MenuItem("Empty", false) {}) }
-            menuState.items.clear()
-            menuState.items.addAll(newItems)
-            
-            // Keep selection within bounds
-            menuState.selectedIndex.value = menuState.selectedIndex.value.coerceIn(0, (newItems.size - 1).coerceAtLeast(0))
         }
+        val newItems = queueItems.ifEmpty { listOf(MenuItem("Empty", false) {}) }
+        
+        // We are no longer using nested menus, so just set the items directly
+        menuState.items.clear()
+        menuState.items.addAll(newItems)
+        
+        // Keep selection within bounds
+        menuState.selectedIndex.value = menuState.selectedIndex.value.coerceIn(0, (newItems.size - 1).coerceAtLeast(0))
     }
 
     // Outer Body (Pure white minimalist style)
@@ -120,11 +87,8 @@ fun ClassipodApp(
                 ClickWheel(
                     onScroll = { ticks -> menuState.scroll(ticks) },
                     onClickMenu = {
-                        if (menuState.isNowPlaying.value) {
-                            menuState.isNowPlaying.value = false
-                        } else {
-                            menuState.popMenu()
-                        }
+                        // Toggle between Now Playing and Playlist
+                        menuState.isNowPlaying.value = !menuState.isNowPlaying.value
                     },
                     onClickPlayPause = {
                         if (playerState.isPlaying) controller?.pause() else controller?.play()
