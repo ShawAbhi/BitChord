@@ -40,12 +40,6 @@ fun ClassipodApp(
             }
             menuState.pushMenu("Playlist", queueItems.ifEmpty { listOf(MenuItem("Empty", false) {}) })
         },
-        MenuItem("Next Song", hasArrow = false) {
-            controller?.seekToNext()
-        },
-        MenuItem("Previous Song", hasArrow = false) {
-            controller?.seekToPrevious()
-        },
         MenuItem("Play / Pause", hasArrow = false) {
             if (playerState.isPlaying) controller?.pause() else controller?.play()
         },
