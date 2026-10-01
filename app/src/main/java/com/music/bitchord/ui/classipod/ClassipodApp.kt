@@ -88,15 +88,28 @@ fun ClassipodApp(
                 ClickWheel(
                     onScroll = { ticks -> 
                         if (menuState.isNowPlaying.value) {
-                            val audioManager = context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
-                            val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                            val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                            val newVol = (currentVol + ticks).coerceIn(0, maxVol)
-                            if (currentVol != newVol) {
-                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
-                                true
+                            if (menuState.isScrubbingMode.value) {
+                                val currentPos = playerState.position.positionMs
+                                val duration = playerState.durationMs
+                                if (duration > 0) {
+                                    val seekAmountMs = 4000L * ticks // 4 seconds per tick
+                                    val newPos = (currentPos + seekAmountMs).coerceIn(0L, duration)
+                                    controller?.seekTo(newPos)
+                                    true
+                                } else {
+                                    false
+                                }
                             } else {
-                                false
+                                val audioManager = context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
+                                val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                                val newVol = (currentVol + ticks).coerceIn(0, maxVol)
+                                if (currentVol != newVol) {
+                                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
+                                    true
+                                } else {
+                                    false
+                                }
                             }
                         } else {
                             menuState.scroll(ticks)
@@ -114,6 +127,8 @@ fun ClassipodApp(
                     onClickCenter = {
                         if (!menuState.isNowPlaying.value && menuState.items.isNotEmpty()) {
                             menuState.items[menuState.selectedIndex.value].onClick()
+                        } else if (menuState.isNowPlaying.value) {
+                            menuState.isScrubbingMode.value = !menuState.isScrubbingMode.value
                         }
                     }
                 )

@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.sp
 import com.music.bitchord.playback.PlayerState
 
 @Composable
-fun PodNowPlaying(playerState: PlayerState) {
+fun PodNowPlaying(playerState: PlayerState, menuState: PodMenuState) {
     val song = playerState.song
     
     Column(
@@ -31,9 +31,10 @@ fun PodNowPlaying(playerState: PlayerState) {
             val queuePos = (playerState.queueIndex + 1).toString()
             val queueTotal = playerState.queue.size.coerceAtLeast(1).toString()
             Text(
-                text = "$queuePos of $queueTotal",
+                text = if (menuState.isScrubbingMode.value) "Scrubbing" else "$queuePos of $queueTotal",
                 fontSize = 13.sp,
                 color = Color(0xFF1E3A5F),
+                fontWeight = if (menuState.isScrubbingMode.value) FontWeight.Bold else FontWeight.Normal,
                 modifier = Modifier.padding(start = 6.dp, top = 4.dp)
             )
             
@@ -93,7 +94,7 @@ fun PodNowPlaying(playerState: PlayerState) {
                         modifier = Modifier
                             .fillMaxWidth(progress.coerceIn(0f, 1f))
                             .fillMaxHeight()
-                            .background(Color(0xFF1E3A5F))
+                            .background(if (menuState.isScrubbingMode.value) Color(0xFF7A9BCF) else Color(0xFF1E3A5F))
                     )
                 }
                 

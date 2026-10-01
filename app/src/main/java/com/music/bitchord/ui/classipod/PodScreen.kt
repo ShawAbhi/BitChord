@@ -84,7 +84,7 @@ fun PodScreen(
             
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (currentMenu.isNowPlaying.value) {
-                    PodNowPlaying(playerState)
+                    PodNowPlaying(playerState, currentMenu)
                 } else {
                     PodMenuList(currentMenu)
                 }
