@@ -92,10 +92,10 @@ fun ClassipodApp(
                                 val duration = playerState.durationMs
                                 if (duration > 0) {
                                     val currentBase = menuState.scrubPositionMs.value ?: playerState.position.positionMs
-                                    val seekAmountMs = 4000L * ticks // 4 seconds per tick
+                                    // 2% of the song per tick, or at least 5 seconds
+                                    val seekAmountMs = maxOf(5000L, (duration * 0.02).toLong()) * ticks 
                                     val newPos = (currentBase + seekAmountMs).coerceIn(0L, duration)
                                     menuState.scrubPositionMs.value = newPos
-                                    controller?.seekTo(newPos)
                                     true
                                 } else {
                                     false
@@ -133,6 +133,8 @@ fun ClassipodApp(
                             if (menuState.isScrubbingMode.value) {
                                 menuState.scrubPositionMs.value = playerState.position.positionMs
                             } else {
+                                // Exiting scrub mode: perform the final definitive seek
+                                menuState.scrubPositionMs.value?.let { finalPos -> controller?.seekTo(finalPos) }
                                 menuState.scrubPositionMs.value = null
                             }
                         }
