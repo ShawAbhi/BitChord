@@ -3080,7 +3080,7 @@ private fun BitChordApp(
                                             tint = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.size(14.dp),
                                         )
-                                        Spacer(Modifier.width(4.dp))
+                                        Spacer(Modifier.width(0.dp))
                                         Text(
                                             text = stringResource(R.string.listen_together_ping, state.latencyMs),
                                             style = MaterialTheme.typography.labelMedium,
@@ -3309,11 +3309,11 @@ private fun BitChordApp(
                             onBlockedControl = showHostOnlyNotice,
                             modifier = Modifier.weight(1f),
                         )
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(0.dp))
                         val context = androidx.compose.ui.platform.LocalContext.current
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(56.dp)
                                 .clip(androidx.compose.foundation.shape.CircleShape)
                                 .optimizedHazeEffect(
                                     state = hazeState,
@@ -3333,10 +3333,11 @@ private fun BitChordApp(
                             androidx.compose.material3.Icon(
                                 painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon_white),
                                 contentDescription = "Open iPod",
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(32.dp),
                                 tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
                             )
                         }
+                        Spacer(Modifier.width(16.dp))
                     }
                 } else Column(
                     modifier = Modifier
@@ -3372,11 +3373,11 @@ private fun BitChordApp(
                                 onBlockedControl = showHostOnlyNotice,
                                 modifier = Modifier.weight(1f),
                             )
-                            Spacer(Modifier.width(4.dp))
+                            Spacer(Modifier.width(0.dp))
                             val context = androidx.compose.ui.platform.LocalContext.current
                             Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(56.dp)
                                 .clip(androidx.compose.foundation.shape.CircleShape)
                                 .optimizedHazeEffect(
                                     state = hazeState,
@@ -3396,7 +3397,7 @@ private fun BitChordApp(
                             androidx.compose.material3.Icon(
                                 painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon_white),
                                 contentDescription = "Open iPod",
-                                modifier = Modifier.size(28.dp),
+                                modifier = Modifier.size(32.dp),
                                 tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
                             )
                         }
