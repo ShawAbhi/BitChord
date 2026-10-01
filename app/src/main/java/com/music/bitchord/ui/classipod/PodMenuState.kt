@@ -12,6 +12,7 @@ data class MenuItem(
 class PodMenuState {
     var isNowPlaying = mutableStateOf(false)
     var isScrubbingMode = mutableStateOf(false)
+    var scrubPositionMs = mutableStateOf<Long?>(null)
     var title = mutableStateOf("BitChord")
     var items = mutableStateListOf<MenuItem>()
     var selectedIndex = mutableStateOf(0)

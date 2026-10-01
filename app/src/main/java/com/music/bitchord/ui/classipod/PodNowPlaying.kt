@@ -86,8 +86,9 @@ fun PodNowPlaying(playerState: PlayerState, menuState: PodMenuState) {
                         .border(1.dp, Color(0xFF1E3A5F), RoundedCornerShape(7.dp))
                         .background(Color.Transparent)
                 ) {
+                    val currentRenderPos = menuState.scrubPositionMs.value ?: playerState.position.positionMs
                     val progress = if (playerState.durationMs > 0) {
-                        playerState.position.positionMs.toFloat() / playerState.durationMs.toFloat()
+                        currentRenderPos.toFloat() / playerState.durationMs.toFloat()
                     } else 0f
                     
                     Box(
@@ -104,8 +105,8 @@ fun PodNowPlaying(playerState: PlayerState, menuState: PodMenuState) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(formatMs(playerState.position.positionMs), fontSize = 12.sp, color = Color(0xFF1E3A5F))
-                    val remaining = playerState.durationMs - playerState.position.positionMs
+                    Text(formatMs(currentRenderPos), fontSize = 12.sp, color = Color(0xFF1E3A5F))
+                    val remaining = playerState.durationMs - currentRenderPos
                     Text(if (remaining > 0) "-" + formatMs(remaining) else "0:00", fontSize = 12.sp, color = Color(0xFF1E3A5F))
                 }
             }

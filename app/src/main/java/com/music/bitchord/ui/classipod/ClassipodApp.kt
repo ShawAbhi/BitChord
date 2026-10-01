@@ -89,11 +89,12 @@ fun ClassipodApp(
                     onScroll = { ticks -> 
                         if (menuState.isNowPlaying.value) {
                             if (menuState.isScrubbingMode.value) {
-                                val currentPos = playerState.position.positionMs
                                 val duration = playerState.durationMs
                                 if (duration > 0) {
+                                    val currentBase = menuState.scrubPositionMs.value ?: playerState.position.positionMs
                                     val seekAmountMs = 4000L * ticks // 4 seconds per tick
-                                    val newPos = (currentPos + seekAmountMs).coerceIn(0L, duration)
+                                    val newPos = (currentBase + seekAmountMs).coerceIn(0L, duration)
+                                    menuState.scrubPositionMs.value = newPos
                                     controller?.seekTo(newPos)
                                     true
                                 } else {
@@ -129,6 +130,11 @@ fun ClassipodApp(
                             menuState.items[menuState.selectedIndex.value].onClick()
                         } else if (menuState.isNowPlaying.value) {
                             menuState.isScrubbingMode.value = !menuState.isScrubbingMode.value
+                            if (menuState.isScrubbingMode.value) {
+                                menuState.scrubPositionMs.value = playerState.position.positionMs
+                            } else {
+                                menuState.scrubPositionMs.value = null
+                            }
                         }
                     }
                 )
