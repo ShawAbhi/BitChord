@@ -411,22 +411,7 @@ private fun GlassNowPlaying(
             // tab pill and the Search circle, and the title is what has to
             // survive that, not a second transport button.
             if (!isInline) {
-                Spacer(Modifier.width(8.dp))
-                IconButton(
-                    onClick = {
-                        haptics.play(Haptic.SkipNext)
-                        onNext()
-                    },
-                    enabled = !controlsLocked,
-                    modifier = Modifier.size(glyphSlot),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.SkipNext,
-                        contentDescription = stringResource(R.string.widget_next),
-                        tint = contentColor.copy(alpha = if (controlsLocked) 0.3f else 1f),
-                        modifier = Modifier.size(glyphSize),
-                    )
-                }
+                
             }
         }
     }

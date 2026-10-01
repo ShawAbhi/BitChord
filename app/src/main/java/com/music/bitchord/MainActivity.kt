@@ -3287,24 +3287,45 @@ private fun BitChordApp(
                     // component they are stacked to imitate: the now playing
                     // controls dock into the tab bar rather than riding above it,
                     // and the pair folds together on scroll. See [GlassNavBar].
-                    GlassNavBar(
-                        tabs = tabs,
-                        selectedIndex = selectedTab,
-                        onTabSelected = onTabSelected,
-                        scrollConnection = navBarScroll,
-                        song = player.song,
-                        isPlaying = player.isPlaying,
-                        isLoading = playPauseBusy,
-                        onPlayPause = {
-                            togglePlayPause()
-                        },
-                        onNext = { controller?.seekToNextMediaItem() },
-                        onPrevious = { controller?.seekToPrevious() },
-                        onExpand = { showNowPlaying = true },
-                        controlsLocked = controlsLocked,
-                        onBlockedControl = showHostOnlyNotice,
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                    )
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GlassNavBar(
+                            tabs = tabs,
+                            selectedIndex = selectedTab,
+                            onTabSelected = onTabSelected,
+                            scrollConnection = navBarScroll,
+                            song = player.song,
+                            isPlaying = player.isPlaying,
+                            isLoading = playPauseBusy,
+                            onPlayPause = {
+                                togglePlayPause()
+                            },
+                            onNext = { controller?.seekToNextMediaItem() },
+                            onPrevious = { controller?.seekToPrevious() },
+                            onExpand = { showNowPlaying = true },
+                            controlsLocked = controlsLocked,
+                            onBlockedControl = showHostOnlyNotice,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        androidx.compose.material3.IconButton(
+                            onClick = {
+                                val intent = android.content.Intent(context, com.music.bitchord.ui.classipod.ClassipodActivity::class.java)
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            androidx.compose.material3.Icon(
+                                painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon_white),
+                                contentDescription = "Open iPod",
+                                modifier = Modifier.size(24.dp),
+                                tint = androidx.compose.material3.MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+                    }
                 } else Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -3320,21 +3341,43 @@ private fun BitChordApp(
                 ) {
                     QueueActionNoticeHost(queueNotice)
                     player.song?.let { song ->
-                        MiniPlayer(
-                            song = song,
-                            isPlaying = player.isPlaying,
-                            isLoading = playPauseBusy,
-                            hazeState = hazeState,
-                            onPlayPause = {
-                                togglePlayPause()
-                            },
-                            onNext = { controller?.seekToNextMediaItem() },
-                            onPrevious = { controller?.seekToPrevious() },
-                            onExpand = { showNowPlaying = true },
-                            controlsLocked = controlsLocked,
-                            onBlockedControl = showHostOnlyNotice,
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                        )
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MiniPlayer(
+                                song = song,
+                                isPlaying = player.isPlaying,
+                                isLoading = playPauseBusy,
+                                hazeState = hazeState,
+                                onPlayPause = {
+                                    togglePlayPause()
+                                },
+                                onNext = { controller?.seekToNextMediaItem() },
+                                onPrevious = { controller?.seekToPrevious() },
+                                onExpand = { showNowPlaying = true },
+                                controlsLocked = controlsLocked,
+                                onBlockedControl = showHostOnlyNotice,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            val context = androidx.compose.ui.platform.LocalContext.current
+                            androidx.compose.material3.IconButton(
+                                onClick = {
+                                    val intent = android.content.Intent(context, com.music.bitchord.ui.classipod.ClassipodActivity::class.java)
+                                    context.startActivity(intent)
+                                },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                androidx.compose.material3.Icon(
+                                    painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon_white),
+                                    contentDescription = "Open iPod",
+                                    modifier = Modifier.size(28.dp),
+                                    tint = androidx.compose.material3.MaterialTheme.colorScheme.onBackground
+                                )
+                            }
+                            Spacer(Modifier.width(16.dp))
+                        }
                         Spacer(Modifier.height(8.dp))
                     }
                     FloatingBottomBar(
@@ -3342,37 +3385,6 @@ private fun BitChordApp(
                         selectedIndex = selectedTab,
                         hazeState = hazeState,
                         onTabSelected = onTabSelected,
-                    )
-                }
-                
-                // iPod FAB (Glass style matching the app)
-                val context = androidx.compose.ui.platform.LocalContext.current
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 16.dp, bottom = 150.dp) // Sits above the MiniPlayer/NavBar
-                        .size(56.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .optimizedHazeEffect(
-                            state = hazeState,
-                            style = dev.chrisbanes.haze.materials.HazeMaterials.regular(androidx.compose.material3.MaterialTheme.colorScheme.surface),
-                        )
-                        .border(
-                            com.music.bitchord.ui.components.GLASS_EDGE_WIDTH, 
-                            com.music.bitchord.ui.components.GLASS_EDGE_COLOR, 
-                            androidx.compose.foundation.shape.CircleShape
-                        )
-                        .clickable {
-                            val intent = android.content.Intent(context, com.music.bitchord.ui.classipod.ClassipodActivity::class.java)
-                            context.startActivity(intent)
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    androidx.compose.foundation.Image(
-                        painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon),
-                        contentDescription = "Open iPod",
-                        modifier = Modifier.size(28.dp),
-                        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurface)
                     )
                 }
             }
