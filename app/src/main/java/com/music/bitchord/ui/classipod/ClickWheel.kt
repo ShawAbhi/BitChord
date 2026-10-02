@@ -1,6 +1,9 @@
 package com.music.bitchord.ui.classipod
 
-import android.view.HapticFeedbackConstants
+import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -14,7 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,7 +32,28 @@ fun ClickWheel(
     onClickPrev: () -> Unit,
     onClickCenter: () -> Unit
 ) {
-    val view = LocalView.current
+    val context = LocalContext.current
+    val vibrator = remember { context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator }
+    val hapticTick = {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(10)
+            }
+        } catch (e: Exception) { }
+    }
+    val hapticClick = {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(20)
+            }
+        } catch (e: Exception) { }
+    }
     val currentOnScroll by rememberUpdatedState(onScroll)
     var lastAngle by remember { mutableStateOf(0f) }
     var accumulatedAngle by remember { mutableStateOf(0f) }
@@ -68,7 +92,7 @@ fun ClickWheel(
                             val ticks = (accumulatedAngle / 15f).toInt()
                             accumulatedAngle -= ticks * 15f
                             if (currentOnScroll(ticks)) {
-                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                                hapticTick()
                             }
                         }
                     }
@@ -83,7 +107,7 @@ fun ClickWheel(
                 .clip(CircleShape)
                 .background(Color(0xFFFFFFFF))
                 .clickable { 
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                    hapticClick()
                     onClickCenter() 
                 }
         )
@@ -99,7 +123,7 @@ fun ClickWheel(
                 .size(60.dp)
                 .clip(CircleShape)
                 .clickable { 
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                    hapticClick()
                     onClickMenu() 
                 },
             contentAlignment = Alignment.Center
@@ -120,7 +144,7 @@ fun ClickWheel(
                 .size(60.dp)
                 .clip(CircleShape)
                 .clickable { 
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                    hapticClick()
                     onClickPlayPause() 
                 },
             contentAlignment = Alignment.Center
@@ -141,7 +165,7 @@ fun ClickWheel(
                 .size(60.dp)
                 .clip(CircleShape)
                 .clickable { 
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                    hapticClick()
                     onClickPrev() 
                 },
             contentAlignment = Alignment.Center
@@ -162,7 +186,7 @@ fun ClickWheel(
                 .size(60.dp)
                 .clip(CircleShape)
                 .clickable { 
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+                    hapticClick()
                     onClickNext() 
                 },
             contentAlignment = Alignment.Center
