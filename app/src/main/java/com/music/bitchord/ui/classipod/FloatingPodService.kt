@@ -48,6 +48,7 @@ import com.music.bitchord.playback.rememberMediaController
 import com.music.bitchord.playback.rememberPlayerState
 import com.music.bitchord.ui.theme.BitChordTheme
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
     companion object {
@@ -88,9 +89,9 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = screenWidth // Handled by Compose now
-            y = 200
+            gravity = Gravity.CENTER
+            x = screenWidth / 2 - 200 // Offset slightly
+            y = -200 // Slightly above center
         }
 
         composeView = ComposeView(this).apply {
@@ -104,7 +105,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                     val playerState = rememberPlayerState(controller)
                     val density = LocalDensity.current
                     
-                    var isExpanded by remember { mutableStateOf(true) }
+                    var isExpanded by remember { mutableStateOf(false) }
                     
                     var expandedWidthDp by remember { mutableStateOf(320.dp) }
                     var expandedHeightDp by remember { mutableStateOf(620.dp) }
@@ -113,60 +114,76 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                     
                     val expansionProgress = remember { Animatable(if (isExpanded) 1f else 0f) }
 
-                    // Track absolute center coordinate of the window so it expands/collapses from center
-                    var centerX by remember { mutableStateOf(screenWidth - with(density) { 320.dp.toPx() } / 2f) }
-                    var centerY by remember { mutableStateOf(200f + with(density) { 620.dp.toPx() } / 2f) }
+                    // Track absolute center coordinate offsets (since gravity is CENTER)
+                    var windowX by remember { mutableStateOf(params.x.toFloat()) }
+                    var windowY by remember { mutableStateOf(params.y.toFloat()) }
                     
                     // Allow external toggles
                     SideEffect {
                         this@FloatingPodService.toggleExpansion = { isExpanded = !isExpanded }
                         this@FloatingPodService.closeExpansion = { isExpanded = false }
                     }
+                    
+                    val scope = rememberCoroutineScope()
 
                     LaunchedEffect(isExpanded) {
-                        expansionProgress.animateTo(
-                            targetValue = if (isExpanded) 1f else 0f,
-                            animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
-                        )
-                        if (!isExpanded) {
-                            // Snap to edges when collapsed
-                            val leftDist = centerX
-                            val rightDist = screenWidth - centerX
-                            centerX = if (leftDist < rightDist) collapsedSizePx / 2f else screenWidth - collapsedSizePx / 2f
+                        if (isExpanded) {
+                            // 1. Immediately expand the invisible WindowManager bounds to hold the animation
+                            params.width = with(density) { expandedWidthDp.toPx() }.roundToInt()
+                            params.height = with(density) { expandedHeightDp.toPx() }.roundToInt()
+                            try {
+                                windowManager.updateViewLayout(composeView, params)
+                            } catch (e: Exception) {}
+                            
+                            // 2. Run the smooth Compose visual animation
+                            expansionProgress.animateTo(
+                                targetValue = 1f,
+                                animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
+                            )
                         } else {
-                            // Ensure fully visible when expanded
-                            val halfW = with(density) { expandedWidthDp.toPx() } / 2f
-                            if (centerX - halfW < 0) centerX = halfW
-                            if (centerX + halfW > screenWidth) centerX = screenWidth - halfW
+                            // 1. Run the smooth Compose visual animation first
+                            expansionProgress.animateTo(
+                                targetValue = 0f,
+                                animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
+                            )
+                            
+                            // 2. Once animation reaches 0, snap the WindowManager bounds down to small size
+                            params.width = collapsedSizePx.roundToInt()
+                            params.height = collapsedSizePx.roundToInt()
+                            
+                            // Optional: snap to edge
+                            val screenHalfWidth = screenWidth / 2f
+                            val absoluteX = screenHalfWidth + windowX
+                            if (absoluteX < screenHalfWidth) {
+                                windowX = -screenHalfWidth + collapsedSizePx / 2f
+                            } else {
+                                windowX = screenHalfWidth - collapsedSizePx / 2f
+                            }
+                            params.x = windowX.roundToInt()
+                            
+                            try {
+                                windowManager.updateViewLayout(composeView, params)
+                            } catch (e: Exception) {}
                         }
                     }
-                    
-                    val expandedWidthPx = with(density) { expandedWidthDp.toPx() }
-                    val expandedHeightPx = with(density) { expandedHeightDp.toPx() }
 
-                    // Sync window size and position dynamically
-                    LaunchedEffect(expansionProgress.value, centerX, centerY, expandedWidthPx, expandedHeightPx) {
-                        val currentWidthPx = collapsedSizePx + (expandedWidthPx - collapsedSizePx) * expansionProgress.value
-                        val currentHeightPx = collapsedSizePx + (expandedHeightPx - collapsedSizePx) * expansionProgress.value
-                        
-                        params.x = (centerX - currentWidthPx / 2f).roundToInt()
-                        params.y = (centerY - currentHeightPx / 2f).roundToInt()
-                        
-                        try {
-                            windowManager.updateViewLayout(composeView, params)
-                        } catch (e: Exception) {}
-                    }
-
+                    // Dragging updates window position synchronously for zero lag
                     val dragModifier = Modifier.pointerInput(Unit) {
                         detectDragGestures(
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                centerX += dragAmount.x
-                                centerY += dragAmount.y
+                                windowX += dragAmount.x
+                                windowY += dragAmount.y
+                                params.x = windowX.roundToInt()
+                                params.y = windowY.roundToInt()
+                                try {
+                                    windowManager.updateViewLayout(composeView, params)
+                                } catch (e: Exception) {}
                             }
                         )
                     }
                     
+                    // Resizing updates both size and position synchronously
                     val resizeModifier = Modifier.pointerInput(Unit) {
                         detectDragGestures(
                             onDrag = { change, dragAmount ->
@@ -174,85 +191,109 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                                 val dragXDp = with(density) { dragAmount.x.toDp() }
                                 val dragYDp = with(density) { dragAmount.y.toDp() }
                                 
+                                val oldWidthPx = with(density) { expandedWidthDp.toPx() }
+                                val oldHeightPx = with(density) { expandedHeightDp.toPx() }
+                                
                                 expandedWidthDp = (expandedWidthDp + dragXDp).coerceIn(200.dp, 600.dp)
                                 expandedHeightDp = (expandedHeightDp + dragYDp).coerceIn(400.dp, 1000.dp)
                                 
-                                centerX += dragAmount.x / 2f
-                                centerY += dragAmount.y / 2f
+                                val newWidthPx = with(density) { expandedWidthDp.toPx() }
+                                val newHeightPx = with(density) { expandedHeightDp.toPx() }
+                                
+                                // Since window is centered, shift center to keep top-left anchored
+                                val diffX = newWidthPx - oldWidthPx
+                                val diffY = newHeightPx - oldHeightPx
+                                
+                                windowX += diffX / 2f
+                                windowY += diffY / 2f
+                                
+                                params.x = windowX.roundToInt()
+                                params.y = windowY.roundToInt()
+                                params.width = newWidthPx.roundToInt()
+                                params.height = newHeightPx.roundToInt()
+                                
+                                try {
+                                    windowManager.updateViewLayout(composeView, params)
+                                } catch (e: Exception) {}
                             }
                         )
                     }
 
-                    val currentWidthDp = 64.dp + (expandedWidthDp - 64.dp) * expansionProgress.value
-                    val currentHeightDp = 64.dp + (expandedHeightDp - 64.dp) * expansionProgress.value
-
+                    // Root container fits the active WindowManager bounds
                     Box(
-                        modifier = Modifier.size(currentWidthDp, currentHeightDp)
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        // Collapsed Icon (fades out as it expands)
-                        if (expansionProgress.value < 1f) {
-                            val isDark = isSystemInDarkTheme()
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .then(dragModifier)
-                                    .alpha(1f - expansionProgress.value)
-                                    .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
-                                    .background(if (isDark) Color(0xFF202124) else Color.White, CircleShape)
-                                    .border(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x1F000000), CircleShape)
-                                    .clickable { isExpanded = true },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ipod_icon_white),
-                                    contentDescription = "Pod",
-                                    modifier = Modifier.size(34.dp),
-                                    tint = if (isDark) Color.White else Color(0xFF1F1F1F)
-                                )
-                            }
-                        }
+                        // The visibly scaling animated box
+                        val currentWidthDp = 64.dp + (expandedWidthDp - 64.dp) * expansionProgress.value
+                        val currentHeightDp = 64.dp + (expandedHeightDp - 64.dp) * expansionProgress.value
 
-                        // Expanded App UI (fades in and scales slightly for pop effect)
-                        if (expansionProgress.value > 0f) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .alpha(expansionProgress.value)
-                                    .graphicsLayer {
-                                        val scale = 0.8f + 0.2f * expansionProgress.value
-                                        scaleX = scale
-                                        scaleY = scale
+                        Box(
+                            modifier = Modifier.size(currentWidthDp, currentHeightDp)
+                        ) {
+                            // Collapsed Icon
+                            if (expansionProgress.value < 1f) {
+                                val isDark = isSystemInDarkTheme()
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .then(dragModifier)
+                                        .alpha(1f - expansionProgress.value)
+                                        .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
+                                        .background(if (isDark) Color(0xFF202124) else Color.White, CircleShape)
+                                        .border(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x1F000000), CircleShape)
+                                        .clickable { isExpanded = true },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ipod_icon_white),
+                                        contentDescription = "Pod",
+                                        modifier = Modifier.size(34.dp),
+                                        tint = if (isDark) Color.White else Color(0xFF1F1F1F)
+                                    )
+                                }
+                            }
+
+                            // Expanded App UI
+                            if (expansionProgress.value > 0f) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .alpha(expansionProgress.value)
+                                        .graphicsLayer {
+                                            val scale = 0.8f + 0.2f * expansionProgress.value
+                                            scaleX = scale
+                                            scaleY = scale
+                                        }
+                                        .padding(start = 24.dp, top = 32.dp, end = 24.dp, bottom = 56.dp)
+                                ) {
+                                    Box(modifier = dragModifier.fillMaxSize()) {
+                                        ClassipodApp(controller, playerState)
                                     }
-                                    .padding(start = 24.dp, top = 32.dp, end = 24.dp, bottom = 56.dp)
-                            ) {
-                                Box(modifier = dragModifier.fillMaxSize()) {
-                                    ClassipodApp(controller, playerState)
-                                }
-                                
-                                // Close button floating outside the main body
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .size(30.dp)
-                                        .background(Color(0x99000000), CircleShape)
-                                        .clickable { isExpanded = false },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("X", color = Color.White, fontWeight = FontWeight.Bold)
-                                }
-                                
-                                // Resize handle at bottom right
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .offset(x = 12.dp, y = 36.dp)
-                                        .size(48.dp)
-                                        .then(resizeModifier),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    androidx.compose.foundation.Canvas(modifier = Modifier.size(16.dp)) {
-                                        drawLine(Color.Gray, start = Offset(8f, 16f), end = Offset(16f, 8f), strokeWidth = 4f)
-                                        drawLine(Color.Gray, start = Offset(0f, 16f), end = Offset(16f, 0f), strokeWidth = 4f)
+                                    
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .size(30.dp)
+                                            .background(Color(0x99000000), CircleShape)
+                                            .clickable { isExpanded = false },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("X", color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                    
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .offset(x = 12.dp, y = 36.dp)
+                                            .size(48.dp)
+                                            .then(resizeModifier),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        androidx.compose.foundation.Canvas(modifier = Modifier.size(16.dp)) {
+                                            drawLine(Color.Gray, start = Offset(8f, 16f), end = Offset(16f, 8f), strokeWidth = 4f)
+                                            drawLine(Color.Gray, start = Offset(0f, 16f), end = Offset(16f, 0f), strokeWidth = 4f)
+                                        }
                                     }
                                 }
                             }
@@ -262,6 +303,10 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
             }
         }
 
+        // Initially we start collapsed, so configure WindowManager for small size
+        params.width = (64 * Resources.getSystem().displayMetrics.density).roundToInt()
+        params.height = (64 * Resources.getSystem().displayMetrics.density).roundToInt()
+        
         windowManager.addView(composeView, params)
     }
 
