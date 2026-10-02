@@ -2,6 +2,7 @@ package com.music.bitchord.ui.classipod
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -21,15 +22,37 @@ fun PodMenuList(menuState: PodMenuState) {
     val listState = rememberLazyListState()
     val selectedIndex = menuState.selectedIndex.value
     
-    // Ensure the selected item is always visible by scrolling the list when necessary
+    // Keep the highlighted row fully on screen. Measured from what the list
+    // has actually laid out rather than assuming a fixed number of rows per
+    // page: the screen's height changes with the iPod's size, and a guessed
+    // count let the highlight slip below the bottom edge.
     LaunchedEffect(selectedIndex) {
-        val firstVisible = listState.firstVisibleItemIndex
-        val itemsPerPage = 6 // Roughly 6 full items fit on this iPod screen height
-        
-        if (selectedIndex < firstVisible) {
-            listState.animateScrollToItem(selectedIndex) // Push list down smoothly
-        } else if (selectedIndex >= firstVisible + itemsPerPage) {
-            listState.animateScrollToItem(selectedIndex - itemsPerPage + 1) // Push list up smoothly
+        val info = listState.layoutInfo
+        val visible = info.visibleItemsInfo
+        if (visible.isEmpty()) return@LaunchedEffect
+        val viewportTop = info.viewportStartOffset
+        val viewportBottom = info.viewportEndOffset - info.afterContentPadding
+        val row = visible.firstOrNull { it.index == selectedIndex }
+        when {
+            // On screen but cut off at the bottom: nudge up just enough.
+            row != null && row.offset + row.size > viewportBottom ->
+                listState.animateScrollBy((row.offset + row.size - viewportBottom).toFloat())
+            // On screen but cut off at the top: nudge down just enough.
+            row != null && row.offset < viewportTop ->
+                listState.animateScrollBy((row.offset - viewportTop).toFloat())
+            row != null -> Unit
+            // Off the top: bring it to the top.
+            selectedIndex < visible.first().index -> listState.animateScrollToItem(selectedIndex)
+            // Off the bottom: scroll so it lands on the bottom edge. Rows are
+            // all one height, so the distance is rows × that height.
+            else -> {
+                val last = visible.last()
+                val rowSize = last.size
+                val overshoot = (last.offset + last.size - viewportBottom).coerceAtLeast(0)
+                listState.animateScrollBy(
+                    ((selectedIndex - last.index) * rowSize + overshoot).toFloat(),
+                )
+            }
         }
     }
 

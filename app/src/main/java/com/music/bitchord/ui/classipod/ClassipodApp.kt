@@ -1,23 +1,27 @@
 package com.music.bitchord.ui.classipod
 
-import android.app.Activity
 import android.media.AudioManager
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.media3.session.MediaController
 import com.music.bitchord.playback.PlayerState
@@ -51,47 +55,64 @@ fun ClassipodApp(
         menuState.selectedIndex.value = menuState.selectedIndex.value.coerceIn(0, (newItems.size - 1).coerceAtLeast(0))
     }
 
-    // Outer Body (Pure white minimalist style)
-    CompositionLocalProvider(
-        LocalDensity provides Density(density = LocalDensity.current.density, fontScale = 1f)
-    ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .shadow(16.dp, RoundedCornerShape(24.dp))
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color(0xFFFAFAFA)) // Very light, almost pure white
-            .border(1.dp, Color(0xFFE5E5E5), RoundedCornerShape(24.dp))
-    ) {
-        Column(
+    val finish = rememberPodFinish()
+
+    // The iPod classic body from the Figma mockup, drawn at whatever size the
+    // window gives it. Everything inside is positioned in the design's own
+    // units (377 across), so [unit] is all that changes with the size.
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val unit = maxWidth / POD_DESIGN_WIDTH
+        val bodyShape = RoundedCornerShape(unit * POD_CORNER_UNITS)
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                // The design has no drop shadow; this one lifts the iPod off
+                // whatever app it floats over.
+                .shadow(12.dp, bodyShape)
+                .clip(bodyShape)
+                .drawBehind { drawPodBody(finish, unit.toPx()) },
         ) {
-            
-            // The Screen (No thick black bezel, just a thin grey outline)
+            // Screen: 318 × [SCREEN_H] glass at (30, 24), with the display inset by
+            // the bezel and, on the Grey finish, the glare over it.
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.42f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFFFFFFFF))
-                    .border(1.dp, Color(0xFFC0C0C0), RoundedCornerShape(8.dp)) // Thin silver border
+                    .offset(unit * SCREEN_X, unit * SCREEN_Y)
+                    .size(unit * SCREEN_W, unit * SCREEN_H)
+                    .clip(RoundedCornerShape(unit * SCREEN_CORNER))
+                    .background(finish.screen)
+                    .then(
+                        finish.screenBezel?.let { bezel ->
+                            Modifier.border(unit * SCREEN_BEZEL, bezel, RoundedCornerShape(unit * SCREEN_CORNER))
+                        } ?: Modifier,
+                    )
+                    .drawWithContent {
+                        drawContent()
+                        if (finish.screenGlare) drawScreenGlare(unit.toPx())
+                    }
+                    .padding(unit * SCREEN_BEZEL),
             ) {
-                PodScreen(controller, playerState, menuState)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(unit * 3f))
+                        // A stronger CRT look laid over the display: denser,
+                        // darker scanlines and a deeper vignette. See [drawCrt].
+                        .drawWithContent {
+                            drawContent()
+                            drawCrt()
+                        },
+                ) {
+                    PodScreen(controller, playerState, menuState)
+                }
             }
-            
-            Spacer(modifier = Modifier.height(28.dp))
-            
-            // Click Wheel area
-            Box(
+
+            // Click wheel: 230 units at (74, [WHEEL_Y]).
+            ClickWheel(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.58f),
-                contentAlignment = Alignment.TopCenter
-            ) {
-                ClickWheel(
+                    .offset(unit * WHEEL_X, unit * WHEEL_Y)
+                    .size(unit * WHEEL_SIZE),
+
                     onScroll = { ticks -> 
                         if (menuState.isNowPlaying.value) {
                             if (menuState.isScrubbingMode.value) {
@@ -152,9 +173,20 @@ fun ClassipodApp(
                             }
                         }
                     }
-                )
+            )
+
+            // The edge shadows sit over everything, blurred, inside the body's
+            // clip — the file's "shadows" group.
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(unit * EDGE_SHADOW_BLUR, BlurredEdgeTreatment.Unbounded),
+            ) {
+                drawPodEdgeShadows(finish, unit.toPx())
             }
         }
     }
-    }
 }
+
+/** The shadows' 20-unit Figma layer blur, as a Compose blur radius of roughly the same spread. */
+private const val EDGE_SHADOW_BLUR = 18f

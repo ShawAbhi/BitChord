@@ -9,8 +9,6 @@ import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.IBinder
-import android.os.VibrationEffect
-import android.os.Vibrator
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
@@ -22,6 +20,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
+import android.widget.FrameLayout
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -38,6 +37,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -51,19 +51,36 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.AndroidUiDispatcher
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -87,6 +104,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -105,6 +126,9 @@ import kotlin.math.roundToInt
  *    pulls away again. Releasing while stuck, or flinging into the target,
  *    closes the PIP and stops the service.
  *  - **Drag the iPod's body** to move the open iPod and its bubble together.
+ *  - **Drag a bottom corner** of the open iPod to resize it, keeping its
+ *    proportions. Shrunk past [AUTO_MINIMIZE_SCALE] it minimises itself, and
+ *    reopens at the size it had before that drag began.
  *
  * It is three overlay windows rather than one, so each can be sized and moved
  * on its own without the open iPod resizing a shared window mid-animation:
@@ -174,8 +198,15 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
     private lateinit var windowManager: WindowManager
 
     private var bubbleView: ComposeView? = null
-    private var podView: ComposeView? = null
+    private var podView: View? = null
     private var targetView: ComposeView? = null
+
+    /**
+     * Stands in for the iPod while it is resized from the bottom-left corner;
+     * see [startStage]. Hidden (zero alpha, untouchable) the rest of the time.
+     */
+    private var stageView: ComposeView? = null
+    private lateinit var stageParams: WindowManager.LayoutParams
     private lateinit var bubbleParams: WindowManager.LayoutParams
     private lateinit var podParams: WindowManager.LayoutParams
     private lateinit var targetParams: WindowManager.LayoutParams
@@ -192,6 +223,23 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
 
     /** 0 = iPod closed (shrunk into the bubble), 1 = fully open. */
     private val podProgress = Animatable(0f)
+
+    /** The iPod's size, as a multiple of its default size. Its aspect ratio never changes. */
+    private val podScale = mutableFloatStateOf(1f)
+
+    /**
+     * The view the iPod is composed in, inside the iPod window. Its size and
+     * offset within the window are what place and scale the iPod on screen —
+     * see [setPodContent] for why those are View layout params and not
+     * Compose state.
+     */
+    private lateinit var podContent: ComposeView
+
+    /** Where [podContent] starts within the iPod window, in px. */
+    private var podContentLeft = 0f
+
+    /** True while a corner is being dragged, so the grips can highlight. */
+    private val resizeActive = mutableStateOf(false)
 
     private val targetShown = mutableStateOf(false)
     private val targetHot = mutableStateOf(false)
@@ -228,7 +276,6 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
     private var velocityTracker: VelocityTracker? = null
 
     private val touchSlop by lazy { ViewConfiguration.get(uiContext).scaledTouchSlop }
-    private val vibrator by lazy { getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -302,14 +349,39 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
             dpInt(POD_HEIGHT_DP + 2 * POD_SHADOW_DP),
             touchable = false,
         ).apply { alpha = 0f }
-        podView = composeView {
-            PodPanel(
-                progress = { podProgress.value },
-                onDrag = ::onPodDrag,
-                onDragEnd = ::onPodDragEnd,
-            )
+        // Wrapped in a view that sees each touch before Compose does, so a
+        // touch on a bottom corner can be taken over for resizing in raw
+        // screen coordinates.
+        podView = PodWindowView(uiContext).apply {
+            setViewTreeLifecycleOwner(this@FloatingPodService)
+            setViewTreeViewModelStoreOwner(this@FloatingPodService)
+            setViewTreeSavedStateRegistryOwner(this@FloatingPodService)
+            podContent = ComposeView(uiContext).apply {
+                setContent {
+                    BitChordTheme {
+                        PodPanel(
+                            progress = { podProgress.value },
+                            resizing = resizeActive.value,
+                            onLayer = { podLayer = it },
+                            onDrag = ::onPodDrag,
+                            onDragEnd = ::onPodDragEnd,
+                        )
+                    }
+                }
+            }
+            addView(podContent, FrameLayout.LayoutParams(podParams.width, podParams.height))
         }
         windowManager.addView(podView, podParams)
+
+        stageParams = overlayParams(1, 1, touchable = false).apply { alpha = 0f }
+        stageView = composeView {
+            ResizeStage(
+                image = stageImage.value,
+                scale = { podScale.floatValue },
+                progress = { podProgress.value },
+            )
+        }
+        windowManager.addView(stageView, stageParams)
 
         bubbleParams = overlayParams(
             dpInt(BUBBLE_DP + 2 * BUBBLE_MARGIN_DP),
@@ -480,6 +552,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         expanded = true
         // Remembered as it is, buried or not, so closing puts it back there.
         restPos = clampRest(bubblePos.value, restBuried)
+        fitPodToScreen()
         val anchor = clampExpanded(bubblePos.value)
         // The iPod is placed once, at its final spot, and only its content
         // animates. Moving a window this size every frame alongside the bubble
@@ -533,9 +606,40 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
     private fun placePod(anchor: Offset) {
         podAnchor = anchor
         val shadow = dp(POD_SHADOW_DP)
-        podParams.x = (anchor.x + dp(BUBBLE_DP) - dp(POD_WIDTH_DP) - shadow).roundToInt()
-        podParams.y = (anchor.y + dp(BUBBLE_DP) + dp(POD_GAP_DP) - shadow).roundToInt()
+        val topLeft = bodyTopLeft(anchor)
+        val width = bodyW() + 2 * shadow
+        val height = bodyH() + 2 * shadow
+        setPodWindow(topLeft.x - shadow, topLeft.y - shadow, width, height)
+        setPodContent(0f, width, height)
+    }
+
+    private fun setPodWindow(left: Float, top: Float, width: Float, height: Float) {
+        podParams.x = left.roundToInt()
+        podParams.y = top.roundToInt()
+        podParams.width = width.roundToInt()
+        podParams.height = height.roundToInt()
         update(podView, podParams)
+    }
+
+    /**
+     * Sizes and offsets the iPod's view inside its window. The iPod scales
+     * itself to whatever size the view is given (see [PodPanel]).
+     *
+     * This is deliberately View layout, not Compose state. A layout param set
+     * here is applied in the very traversal that applies the window's new
+     * frame, so the two can never disagree. Compose state written from outside
+     * a composition is only picked up a frame later, and for that one frame
+     * the iPod was drawn at its old offset in the window's new frame — the
+     * jump to the side at the start and end of every resize.
+     */
+    private fun setPodContent(left: Float, width: Float, height: Float) {
+        podContentLeft = left
+        val params = podContent.layoutParams as FrameLayout.LayoutParams
+        params.leftMargin = left.roundToInt()
+        params.topMargin = 0
+        params.width = width.roundToInt()
+        params.height = height.roundToInt()
+        podContent.layoutParams = params
     }
 
     private fun showPodWindow() {
@@ -556,6 +660,11 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
 
     private fun hidePodWindow() {
         podWindowShown = false
+        // Shrunk away by resizing too small: it reopens at the size the resize
+        // started from, not the size that triggered the minimise.
+        restoreScaleOnHide?.let { podScale.floatValue = it }
+        restoreScaleOnHide = null
+        if (stageShown || stageImage.value != null) hideStage()
         podParams.alpha = 0f
         podParams.flags = podParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         update(podView, podParams)
@@ -665,10 +774,10 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         val area = area()
         val size = dp(BUBBLE_DP)
         val margin = dp(EDGE_MARGIN_DP)
-        val minX = area.left + margin + dp(POD_WIDTH_DP) - size
+        val minX = area.left + margin + bodyW() - size
         val maxX = area.right - margin - size
         val minY = area.top + margin
-        val maxY = area.bottom - margin - size - dp(POD_GAP_DP) - dp(POD_HEIGHT_DP)
+        val maxY = area.bottom - margin - size - dp(POD_GAP_DP) - bodyH()
         return Offset(p.x.coerceIn(minX, max(minX, maxX)), p.y.coerceIn(minY, max(minY, maxY)))
     }
 
@@ -734,6 +843,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         bubbleView?.post {
             if (dismissing) return@post
             if (expanded) {
+                fitPodToScreen()
                 podTracksBubble = true
                 podAnchor = clampExpanded(podAnchor)
                 springTo(podAnchor, SETTLE_SPRING)
@@ -741,6 +851,362 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                 restPos = clampRest(bubblePos.value, restBuried)
                 springTo(restPos, SETTLE_SPRING)
             }
+        }
+    }
+
+    // ── Resizing ─────────────────────────────────────────────────────────
+
+    private enum class Corner { BOTTOM_LEFT, BOTTOM_RIGHT }
+
+    /** The corner being dragged, or null when not resizing. */
+    private var resizeCorner: Corner? = null
+    private var resizeStartScale = 1f
+    private var resizeStartRaw = Offset.Zero
+
+    /** The body corner that stays put: its top-left for a bottom-right drag, top-right for bottom-left. */
+    private var resizeFixed = Offset.Zero
+    private var resizeMaxScale = 1f
+
+    /** Below this the iPod minimises itself instead of getting any smaller. */
+    private var resizeMinimizeBelow = AUTO_MINIMIZE_SCALE
+
+    /** The size to put back once an auto-minimised iPod has finished closing. */
+    private var restoreScaleOnHide: Float? = null
+
+    private fun bodyW(scale: Float = podScale.floatValue) = dp(POD_WIDTH_DP) * scale
+    private fun bodyH(scale: Float = podScale.floatValue) = dp(POD_HEIGHT_DP) * scale
+
+    /** The iPod body's top-left on screen when its bubble is at [anchor]. */
+    private fun bodyTopLeft(anchor: Offset, scale: Float = podScale.floatValue) = Offset(
+        anchor.x + dp(BUBBLE_DP) - bodyW(scale),
+        anchor.y + dp(BUBBLE_DP) + dp(POD_GAP_DP),
+    )
+
+    /** The bubble position for a body whose top-right corner is at [topRight]. */
+    private fun anchorFor(topRight: Offset) = Offset(
+        topRight.x - dp(BUBBLE_DP),
+        topRight.y - dp(POD_GAP_DP) - dp(BUBBLE_DP),
+    )
+
+    /** Shrinks the iPod if it no longer fits the screen (rotation, a smaller window). */
+    private fun fitPodToScreen() {
+        val area = area()
+        val margin = dp(EDGE_MARGIN_DP)
+        val fit = minOf(
+            MAX_POD_SCALE,
+            (area.right - area.left - 2 * margin) / dp(POD_WIDTH_DP),
+            (area.bottom - area.top - 2 * margin - dp(BUBBLE_DP) - dp(POD_GAP_DP)) / dp(POD_HEIGHT_DP),
+        ).coerceAtLeast(MIN_FIT_SCALE)
+        if (podScale.floatValue > fit) podScale.floatValue = fit
+    }
+
+    /** Which bottom corner, if any, a touch at window-local ([x], [y]) is grabbing. */
+    private fun cornerAt(x: Float, y: Float): Corner? {
+        if (!expanded || dismissing || podProgress.value < 0.95f) return null
+        // Still swapping back from the stage after the last bottom-left drag.
+        if (stageJob?.isActive == true || stageShown) return null
+        val shadow = dp(POD_SHADOW_DP)
+        val width = bodyW()
+        val left = podContentLeft + shadow
+        val bottom = shadow + bodyH()
+        // Narrower on a small iPod, so the corners don't swallow the wheel.
+        val reach = (width * 0.35f).coerceIn(dp(RESIZE_HANDLE_MIN_DP), dp(RESIZE_HANDLE_DP))
+        return when {
+            hypot(x - left, y - bottom) < reach -> Corner.BOTTOM_LEFT
+            hypot(x - (left + width), y - bottom) < reach -> Corner.BOTTOM_RIGHT
+            else -> null
+        }
+    }
+
+    private fun startResize(corner: Corner, raw: Offset) {
+        motionJob?.cancel()
+        podTracksBubble = false
+        val scale = podScale.floatValue
+        val topLeft = bodyTopLeft(podAnchor, scale)
+        val fromRight = corner == Corner.BOTTOM_RIGHT
+
+        resizeCorner = corner
+        resizeStartScale = scale
+        resizeStartRaw = raw
+        resizeFixed = if (fromRight) topLeft else Offset(topLeft.x + bodyW(scale), topLeft.y)
+        resizeMinimizeBelow = minOf(AUTO_MINIMIZE_SCALE, scale * 0.85f)
+
+        // As big as this drag could make it: up to the screen edge it grows
+        // toward, and never so tall that it runs off the bottom.
+        val area = area()
+        val margin = dp(EDGE_MARGIN_DP)
+        val roomX = if (fromRight) area.right - margin - resizeFixed.x else resizeFixed.x - (area.left + margin)
+        val roomY = area.bottom - margin - resizeFixed.y
+        resizeMaxScale = minOf(MAX_POD_SCALE, roomX / dp(POD_WIDTH_DP), roomY / dp(POD_HEIGHT_DP))
+            .coerceAtLeast(scale)
+
+        resizeActive.value = true
+        val shadow = dp(POD_SHADOW_DP)
+        resizeWindowW = bodyW(resizeMaxScale) + 2 * shadow
+        val windowH = bodyH(resizeMaxScale) + 2 * shadow
+        if (fromRight) {
+            // Growing right and down: the window is enlarged once, now, to the
+            // biggest size this drag can reach. Its top-left corner doesn't
+            // move, so even the frame before the iPod redraws at the new size
+            // shows it exactly where it was. Each frame then only re-lays-out
+            // the content inside it.
+            setPodWindow(resizeFixed.x - shadow, resizeFixed.y - shadow, resizeWindowW, windowH)
+            layoutResizingContent(scale)
+        } else {
+            // Growing left: enlarging the window would move its left edge, and
+            // the system can show the old picture at the new left edge for a
+            // frame — the jump this avoids. The iPod's window is left exactly
+            // as it is, and the resize is shown in the stage window instead.
+            startStage(resizeFixed.x + shadow - resizeWindowW, resizeFixed.y - shadow, resizeWindowW, windowH)
+        }
+        tick()
+    }
+
+    /** The resize window's width, fixed for the length of one drag. */
+    private var resizeWindowW = 0f
+
+    /** Lays the iPod's view out at [scale] inside the enlarged resize window, against the fixed corner. */
+    private fun layoutResizingContent(scale: Float) {
+        val shadow = dp(POD_SHADOW_DP)
+        val width = bodyW(scale) + 2 * shadow
+        val height = bodyH(scale) + 2 * shadow
+        setPodContent(0f, width, height)
+    }
+
+    private fun resizeTo(raw: Offset) {
+        val corner = resizeCorner ?: return
+        val fromRight = corner == Corner.BOTTOM_RIGHT
+        val delta = raw - resizeStartRaw
+        // The dragged corner, measured from the fixed one. Projected onto the
+        // body's own diagonal so the ratio holds however the finger wanders.
+        val width = bodyW(resizeStartScale) + if (fromRight) delta.x else -delta.x
+        val height = bodyH(resizeStartScale) + delta.y
+        val baseW = dp(POD_WIDTH_DP)
+        val baseH = dp(POD_HEIGHT_DP)
+        val scale = (width * baseW + height * baseH) / (baseW * baseW + baseH * baseH)
+
+        if (scale < resizeMinimizeBelow) {
+            autoMinimize()
+            return
+        }
+        val clamped = scale.coerceAtMost(resizeMaxScale)
+        podScale.floatValue = clamped
+        if (fromRight) {
+            layoutResizingContent(clamped)
+            // The bubble rides the iPod's top-right corner, which only moves
+            // when the right side is the one being dragged.
+            val anchor = anchorFor(Offset(resizeFixed.x + bodyW(clamped), resizeFixed.y))
+            podAnchor = anchor
+            motionJob?.cancel()
+            snap(anchor)
+        }
+        // Bottom-left: the stage window draws the new size from [podScale] —
+        // unless there is no stage, in which case the iPod resizes in place.
+        if (!fromRight && stageFallback) {
+            val shadow = dp(POD_SHADOW_DP)
+            val width = bodyW(clamped) + 2 * shadow
+            setPodContent(resizeWindowW - width, width, bodyH(clamped) + 2 * shadow)
+        }
+    }
+
+    private fun endResize() {
+        val corner = resizeCorner ?: return
+        resizeCorner = null
+        resizeActive.value = false
+        val shadow = dp(POD_SHADOW_DP)
+
+        val viaStage = corner == Corner.BOTTOM_LEFT && !stageFallback
+        stageFallback = false
+        if (viaStage && !stageShown) {
+            // Let go before the stage was even up: nothing visible has
+            // changed, so neither should anything else.
+            stageJob?.cancel()
+            hideStage()
+            podScale.floatValue = resizeStartScale
+            return
+        }
+
+        val scale = podScale.floatValue
+        val topLeft = if (corner == Corner.BOTTOM_RIGHT) {
+            resizeFixed
+        } else {
+            Offset(resizeFixed.x - bodyW(scale), resizeFixed.y)
+        }
+        podAnchor = anchorFor(Offset(topLeft.x + bodyW(scale), topLeft.y))
+        // Back to a window that fits the body exactly, so the space it no
+        // longer covers stops catching touches meant for the apps beneath.
+        val width = bodyW(scale) + 2 * shadow
+        val height = bodyH(scale) + 2 * shadow
+        setPodWindow(topLeft.x - shadow, topLeft.y - shadow, width, height)
+        setPodContent(0f, width, height)
+        // Bottom-left: the iPod's window was hidden behind the stage, so it
+        // has just been moved and resized out of sight. It is shown again only
+        // once it has drawn at its new size, then the stage steps away.
+        if (viaStage) handBackFromStage()
+    }
+
+    /** Dragged too small: minimise, and remember the size the drag started from. */
+    private fun autoMinimize() {
+        val viaStage = resizeCorner == Corner.BOTTOM_LEFT && !stageFallback
+        stageFallback = false
+        resizeCorner = null
+        resizeActive.value = false
+        restoreScaleOnHide = resizeStartScale
+        heavyClick()
+        if (viaStage && !stageShown) {
+            // The stage never came up, so the iPod on screen is still the
+            // untouched one: minimise that as normal.
+            stageJob?.cancel()
+            hideStage()
+        }
+        // With the stage up, it is the stage that shrinks into the bubble —
+        // it draws [podProgress] too — while the real iPod stays hidden.
+        collapse(returnToRest = true)
+    }
+
+    // ── Stage (bottom-left resizing) ─────────────────────────────────────
+
+    /** Captures the iPod as drawn; set by [PodPanel]. */
+    private var podLayer: GraphicsLayer? = null
+
+    /** The picture of the iPod the stage draws while resizing from the bottom left. */
+    private val stageImage = mutableStateOf<ImageBitmap?>(null)
+
+    /** Whether the stage is on screen with the real iPod hidden behind it. */
+    private var stageShown = false
+    private var stageJob: Job? = null
+
+    /** True when this bottom-left drag couldn't use the stage and resizes the iPod in place instead. */
+    private var stageFallback = false
+
+    /**
+     * Puts up the stage over the iPod: a window already the size the drag can
+     * reach, showing a picture of the iPod that it scales as the corner moves.
+     *
+     * Nothing visible moves at any point. The stage is sized and filled while
+     * still transparent, made visible only once it has drawn, and the real
+     * iPod is hidden only after that — so for a frame there are two identical
+     * iPods in the same place, never none and never one in the wrong place.
+     */
+    private fun startStage(left: Float, top: Float, width: Float, height: Float) {
+        stageJob?.cancel()
+        stageFallback = false
+        stageParams.x = left.roundToInt()
+        stageParams.y = top.roundToInt()
+        stageParams.width = width.roundToInt()
+        stageParams.height = height.roundToInt()
+        stageParams.alpha = 0f
+        update(stageView, stageParams)
+        stageJob = scope.launch {
+            val image = runCatching { podLayer?.toImageBitmap() }.getOrNull()
+            if (image == null) {
+                // Couldn't take the picture. Fall back to enlarging the iPod's
+                // own window: it may jump once, but it still resizes.
+                Log.w(TAG, "Classipod: no snapshot for the resize stage; resizing in place")
+                resizeCorner?.let { fallBackToInPlaceResize() }
+                return@launch
+            }
+            stageImage.value = image
+            awaitDrawn(stageView)
+            if (resizeCorner == null && !expanded) return@launch
+            // Touchable while it is up. An overlay that lets touches through
+            // is drawn at no more than 80% opacity from Android 12, which is
+            // what made the iPod turn see-through here. The drag itself is
+            // unaffected: its touches keep going to the iPod's window, where
+            // it started.
+            stageParams.alpha = 1f
+            stageParams.flags = stageParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            update(stageView, stageParams)
+            awaitFrames(2)
+            podParams.alpha = 0f
+            update(podView, podParams)
+            stageShown = true
+        }
+    }
+
+    /** Shows the real iPod again once it has drawn at its new size, then drops the stage. */
+    private fun handBackFromStage() {
+        stageJob?.cancel()
+        stageJob = scope.launch {
+            // Wait until the real iPod has actually put a frame on screen at
+            // its new size and place — not just a fixed number of frames,
+            // which wasn't always enough, and showing it any earlier shows
+            // its old picture at the new position: the jump at the end.
+            awaitDrawn(podView)
+            awaitFrames(1)
+            podParams.alpha = 1f
+            update(podView, podParams)
+            awaitFrames(2)
+            hideStage()
+        }
+    }
+
+    private fun hideStage() {
+        stageShown = false
+        stageParams.alpha = 0f
+        stageParams.flags = stageParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        update(stageView, stageParams)
+        stageImage.value = null
+    }
+
+    /**
+     * Suspends until [view]'s window has committed a new frame — drawn and
+     * handed to the display — or a short timeout passes.
+     */
+    private suspend fun awaitDrawn(view: View?) {
+        if (view == null) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            awaitFrames(STAGE_SETTLE_FRAMES + 2)
+            return
+        }
+        withTimeoutOrNull(DRAW_WAIT_TIMEOUT_MS) {
+            suspendCancellableCoroutine<Unit> { continuation ->
+                view.viewTreeObserver.registerFrameCommitCallback {
+                    if (continuation.isActive) continuation.resume(Unit)
+                }
+                view.invalidate()
+            }
+        }
+    }
+
+    /** The bottom-left drag without a stage: enlarge the iPod's own window, as the bottom right does. */
+    private fun fallBackToInPlaceResize() {
+        stageFallback = true
+        val shadow = dp(POD_SHADOW_DP)
+        val windowH = bodyH(resizeMaxScale) + 2 * shadow
+        setPodWindow(resizeFixed.x + shadow - resizeWindowW, resizeFixed.y - shadow, resizeWindowW, windowH)
+        val width = bodyW() + 2 * shadow
+        setPodContent(resizeWindowW - width, width, bodyH() + 2 * shadow)
+    }
+
+    private suspend fun awaitFrames(count: Int) {
+        repeat(count) { withFrameNanos { } }
+    }
+
+    /**
+     * The iPod window's root. It sees every touch before Compose does, and
+     * keeps the ones that start on a bottom corner for itself: those resize,
+     * in raw screen coordinates, so the window being re-laid-out under the
+     * finger can't skew the deltas.
+     */
+    private inner class PodWindowView(context: Context) : FrameLayout(context) {
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            val raw = Offset(event.rawX, event.rawY)
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                val corner = cornerAt(event.x, event.y)
+                if (corner != null) {
+                    startResize(corner, raw)
+                    return true
+                }
+            }
+            if (resizeCorner != null) {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_MOVE -> resizeTo(raw)
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> endResize()
+                }
+                return true
+            }
+            return super.dispatchTouchEvent(event)
         }
     }
 
@@ -822,20 +1288,8 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         }
     }
 
-    private fun tick() = vibrate(VibrationEffect.EFFECT_TICK, 10)
-    private fun heavyClick() = vibrate(VibrationEffect.EFFECT_HEAVY_CLICK, 30)
-
-    private fun vibrate(effect: Int, fallbackMs: Long) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                vibrator?.vibrate(VibrationEffect.createPredefined(effect))
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator?.vibrate(fallbackMs)
-            }
-        } catch (_: Exception) {
-        }
-    }
+    private fun tick() = PodHaptics.tick(this)
+    private fun heavyClick() = PodHaptics.heavy(this)
 
     override fun onDestroy() {
         isRunning.value = false
@@ -846,12 +1300,13 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         }
         if (::windowManager.isInitialized) {
-            listOf(bubbleView, podView, targetView).forEach { view ->
+            listOf(bubbleView, stageView, podView, targetView).forEach { view ->
                 if (view != null) runCatching { windowManager.removeView(view) }
             }
         }
         bubbleView = null
         podView = null
+        stageView = null
         targetView = null
         store.clear()
         super.onDestroy()
@@ -866,13 +1321,27 @@ private const val BUBBLE_MARGIN_DP = 10
 /** How far a resting bubble sits from the screen edge. */
 private const val EDGE_MARGIN_DP = 8
 
-/** The iPod body. */
-private const val POD_WIDTH_DP = 272
-private const val POD_HEIGHT_DP = 532
+/**
+ * The iPod body: the Figma mockup's 377 units at 290 dp wide, and its height
+ * (626 plus [SCREEN_EXTRA]) at the same scale — 290 × 666 / 377.
+ */
+private const val POD_WIDTH_DP = 290
+private const val POD_HEIGHT_DP = 512
 /** Room around the iPod body inside its window for its shadow and a little overshoot. */
 private const val POD_SHADOW_DP = 20
 /** Space between the bubble and the top of the iPod beneath it. */
 private const val POD_GAP_DP = 8
+
+/** The largest the iPod can be resized to, as a multiple of its default size. */
+private const val MAX_POD_SCALE = 1.35f
+/** Resized below this, the iPod minimises itself (see [FloatingPodService.autoMinimize]). */
+private const val AUTO_MINIMIZE_SCALE = 0.2f
+/** The smallest it is ever shrunk to just to fit a short screen, e.g. in landscape. */
+private const val MIN_FIT_SCALE = 0.45f
+/** How far from a bottom corner a touch still grabs it for resizing. */
+private const val RESIZE_HANDLE_DP = 40
+/** The smallest that reach gets, on a very small iPod. */
+private const val RESIZE_HANDLE_MIN_DP = 20
 
 private const val TARGET_SIZE_DP = 64
 /** The close target's window: big enough for the target to grow and lean toward the bubble. */
@@ -955,33 +1424,42 @@ private fun Bubble(scale: () -> Float) {
 /**
  * The iPod, growing out of and shrinking back into the bubble at its top right.
  *
- * [progress] is only read in the draw phase, so opening and closing redraw
- * the iPod without recomposing it.
+ * It scales itself to fit the view it is given: laid out at its default size,
+ * then drawn at whatever size its view has. A resize therefore keeps every
+ * proportion — the click wheel, the type, the screen — rather than reflowing
+ * it, and needs no Compose state to drive it (see
+ * [FloatingPodService.setPodContent]). [progress] is read in the draw phase
+ * only, so opening and closing don't recompose it either.
+ *
+ * @param resizing highlights the corner grips while one is being dragged.
  */
 @Composable
 private fun PodPanel(
     progress: () -> Float,
+    resizing: Boolean,
+    onLayer: (GraphicsLayer) -> Unit,
     onDrag: (Offset) -> Unit,
     onDragEnd: () -> Unit,
 ) {
     val controller = rememberMediaController()
     val playerState = rememberPlayerState(controller)
-
-    // The bubble's centre, as a fraction of the iPod body: the point the iPod
-    // scales from, so it looks like it comes out of the bubble.
-    val origin = TransformOrigin(
-        pivotFractionX = (POD_WIDTH_DP - BUBBLE_DP / 2f) / POD_WIDTH_DP,
-        pivotFractionY = -(BUBBLE_DP / 2f + POD_GAP_DP) / POD_HEIGHT_DP,
-    )
+    val gripColor = if (resizing) Color(0xF2FFFFFF) else Color(0x99A0A0A0)
+    // Everything the iPod draws, shadow included, also goes into this layer,
+    // so the service can take a picture of it for the resize stage.
+    val captureLayer = rememberGraphicsLayer()
+    SideEffect { onLayer(captureLayer) }
 
     Box(
         modifier = Modifier
-            .size((POD_WIDTH_DP + 2 * POD_SHADOW_DP).dp, (POD_HEIGHT_DP + 2 * POD_SHADOW_DP).dp)
+            .fillMaxSize()
+            .drawWithContent {
+                captureLayer.record { this@drawWithContent.drawContent() }
+                drawLayer(captureLayer)
+            }
             .padding(POD_SHADOW_DP.dp),
     ) {
         Box(
             modifier = Modifier
-                .fillMaxSize()
                 .graphicsLayer {
                     val p = progress()
                     val s = MIN_POD_SCALE + (1f - MIN_POD_SCALE) * p
@@ -990,9 +1468,30 @@ private fun PodPanel(
                     // Faded only over the first stretch. Below full opacity
                     // the whole iPod is drawn into an offscreen buffer every
                     // frame; at full opacity a scale is just a matrix change
-                    // on an already-recorded layer.
-                    alpha = (p * 4f).coerceIn(0f, 1f)
-                    transformOrigin = origin
+                    // on an already-recorded layer. Resizing toward the
+                    // minimise point fades it as a warning.
+                    val podScale = size.width / POD_WIDTH_DP.dp.toPx()
+                    val minimizeHint = ((podScale - AUTO_MINIMIZE_SCALE) / 0.1f).coerceIn(0f, 1f)
+                    alpha = (p * 4f).coerceIn(0f, 1f) * (0.55f + 0.45f * minimizeHint)
+                    // The bubble's centre, as a fraction of the body at its
+                    // current size: the point it grows out of and shrinks into.
+                    transformOrigin = TransformOrigin(
+                        pivotFractionX = (size.width - (BUBBLE_DP / 2f).dp.toPx()) / size.width,
+                        pivotFractionY = -(BUBBLE_DP / 2f + POD_GAP_DP).dp.toPx() / size.height,
+                    )
+                }
+                .drawWithContent {
+                    drawContent()
+                    // Grips just outside the two bottom corners, following
+                    // the body's rounding, where a drag resizes it.
+                    val corner = POD_CORNER_DP.dp.toPx() * (size.width / POD_WIDTH_DP.dp.toPx())
+                    val radius = corner + 7.dp.toPx()
+                    val stroke = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round)
+                    val arcSize = Size(radius * 2, radius * 2)
+                    val right = Offset(size.width - corner, size.height - corner)
+                    val left = Offset(corner, size.height - corner)
+                    drawArc(gripColor, 15f, 60f, false, right - Offset(radius, radius), arcSize, style = stroke)
+                    drawArc(gripColor, 105f, 60f, false, left - Offset(radius, radius), arcSize, style = stroke)
                 }
                 .pointerInput(Unit) {
                     detectDragGestures(
@@ -1003,12 +1502,96 @@ private fun PodPanel(
                         onDragEnd = onDragEnd,
                         onDragCancel = onDragEnd,
                     )
+                }
+                // Measured at the default size, then drawn scaled down or up
+                // to fill whatever space the view gives it.
+                .layout { measurable, constraints ->
+                    val baseW = POD_WIDTH_DP.dp.roundToPx()
+                    val baseH = POD_HEIGHT_DP.dp.roundToPx()
+                    val s = constraints.maxWidth.toFloat() / baseW
+                    val placeable = measurable.measure(Constraints.fixed(baseW, baseH))
+                    layout(constraints.maxWidth, (baseH * s).roundToInt().coerceAtMost(constraints.maxHeight)) {
+                        placeable.placeWithLayer(0, 0) {
+                            scaleX = s
+                            scaleY = s
+                            transformOrigin = TransformOrigin(0f, 0f)
+                        }
+                    }
                 },
         ) {
             ClassipodApp(controller, playerState)
         }
     }
 }
+
+/**
+ * The stand-in drawn while the iPod is resized from its bottom-left corner:
+ * [image] (the iPod as it was when the drag began) scaled to [scale], pinned
+ * at its top-right corner, which is the window's top-right less the shadow
+ * margin. It also follows [progress], so if the drag minimises the iPod, the
+ * stage is what shrinks into the bubble.
+ */
+@Composable
+private fun ResizeStage(image: ImageBitmap?, scale: () -> Float, progress: () -> Float) {
+    if (image == null) return
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val shadow = POD_SHADOW_DP.dp.toPx()
+        val baseW = POD_WIDTH_DP.dp.roundToPx().toFloat()
+        val baseH = POD_HEIGHT_DP.dp.roundToPx().toFloat()
+        val s = scale()
+        // The scale the picture was taken at, from its own size.
+        val takenAt = (image.width - 2 * shadow) / baseW
+        val k = s / takenAt
+        val bodyW = baseW * s
+        val bodyH = baseH * s
+        val bodyLeft = size.width - shadow - bodyW
+        val bodyTop = shadow
+
+        val p = progress()
+        val open = MIN_POD_SCALE + (1f - MIN_POD_SCALE) * p
+        val bubble = BUBBLE_DP.dp.toPx()
+        val pivot = Offset(
+            size.width - shadow - bubble / 2f,
+            shadow - POD_GAP_DP.dp.toPx() - bubble / 2f,
+        )
+        val minimizeHint = ((s - AUTO_MINIMIZE_SCALE) / 0.1f).coerceIn(0f, 1f)
+        val alpha = (p * 4f).coerceIn(0f, 1f) * (0.55f + 0.45f * minimizeHint)
+
+        withTransform({ scale(open, open, pivot) }) {
+            drawImage(
+                image = image,
+                dstOffset = IntOffset(
+                    (bodyLeft - shadow * k).roundToInt(),
+                    (bodyTop - shadow * k).roundToInt(),
+                ),
+                dstSize = IntSize(
+                    (image.width * k).roundToInt(),
+                    (image.height * k).roundToInt(),
+                ),
+                alpha = alpha,
+                filterQuality = FilterQuality.Medium,
+            )
+            // The grips, lit, as on the real iPod while a corner is held.
+            val corner = POD_CORNER_DP.dp.toPx() * s
+            val radius = corner + 7.dp.toPx()
+            val stroke = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round)
+            val arcSize = Size(radius * 2, radius * 2)
+            val grip = Color(0xF2FFFFFF).copy(alpha = 0.95f * alpha)
+            val right = Offset(bodyLeft + bodyW - corner, bodyTop + bodyH - corner)
+            val left = Offset(bodyLeft + corner, bodyTop + bodyH - corner)
+            drawArc(grip, 15f, 60f, false, right - Offset(radius, radius), arcSize, style = stroke)
+            drawArc(grip, 105f, 60f, false, left - Offset(radius, radius), arcSize, style = stroke)
+        }
+    }
+}
+
+/** How many frames a window is given to draw before it is shown, where frame commits can't be watched. */
+private const val STAGE_SETTLE_FRAMES = 3
+/** The longest to wait for a window to commit a frame before carrying on anyway. */
+private const val DRAW_WAIT_TIMEOUT_MS = 250L
+
+/** The iPod body's corner radius (see [ClassipodApp]). */
+private const val POD_CORNER_DP = 29
 
 private const val MIN_POD_SCALE = 0.1f
 
