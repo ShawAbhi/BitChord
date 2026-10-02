@@ -68,7 +68,7 @@ fun ClickWheel(
                             val ticks = (accumulatedAngle / 15f).toInt()
                             accumulatedAngle -= ticks * 15f
                             if (currentOnScroll(ticks)) {
-                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
                             }
                         }
                     }
@@ -83,7 +83,7 @@ fun ClickWheel(
                 .clip(CircleShape)
                 .background(Color(0xFFFFFFFF))
                 .clickable { 
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
                     onClickCenter() 
                 }
         )
@@ -99,7 +99,7 @@ fun ClickWheel(
                 .size(60.dp)
                 .clip(CircleShape)
                 .clickable { 
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
                     onClickMenu() 
                 },
             contentAlignment = Alignment.Center
@@ -120,7 +120,7 @@ fun ClickWheel(
                 .size(60.dp)
                 .clip(CircleShape)
                 .clickable { 
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
                     onClickPlayPause() 
                 },
             contentAlignment = Alignment.Center
@@ -141,7 +141,7 @@ fun ClickWheel(
                 .size(60.dp)
                 .clip(CircleShape)
                 .clickable { 
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
                     onClickPrev() 
                 },
             contentAlignment = Alignment.Center
@@ -162,7 +162,7 @@ fun ClickWheel(
                 .size(60.dp)
                 .clip(CircleShape)
                 .clickable { 
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
                     onClickNext() 
                 },
             contentAlignment = Alignment.Center
