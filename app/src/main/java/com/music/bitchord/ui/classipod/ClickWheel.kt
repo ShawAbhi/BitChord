@@ -39,51 +39,45 @@ fun ClickWheel(
     val vibrator = remember { context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator }
     
     val hapticTick = {
-        val hapticEnabled = Settings.System.getInt(context.contentResolver, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) == 1
-        if (hapticEnabled) {
-            try {
-                val audioAttrs = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        try {
+            val audioAttrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val vibAttrs = VibrationAttributes.Builder()
+                    .setUsage(VibrationAttributes.USAGE_ALARM)
                     .build()
-                
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val vibAttrs = VibrationAttributes.Builder()
-                        .setUsage(VibrationAttributes.USAGE_ALARM)
-                        .build()
-                    vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK), vibAttrs)
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK), audioAttrs)
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(10, audioAttrs)
-                }
-            } catch (e: Exception) {}
-        }
+                vibrator.vibrate(VibrationEffect.createOneShot(10, 100), vibAttrs)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(10, 100), audioAttrs)
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(10, audioAttrs)
+            }
+        } catch (e: Exception) {}
     }
     
     val hapticClick = {
-        val hapticEnabled = Settings.System.getInt(context.contentResolver, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) == 1
-        if (hapticEnabled) {
-            try {
-                val audioAttrs = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        try {
+            val audioAttrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val vibAttrs = VibrationAttributes.Builder()
+                    .setUsage(VibrationAttributes.USAGE_ALARM)
                     .build()
-                
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val vibAttrs = VibrationAttributes.Builder()
-                        .setUsage(VibrationAttributes.USAGE_ALARM)
-                        .build()
-                    vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK), vibAttrs)
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK), audioAttrs)
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(20, audioAttrs)
-                }
-            } catch (e: Exception) {}
-        }
+                vibrator.vibrate(VibrationEffect.createOneShot(20, 200), vibAttrs)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(20, 200), audioAttrs)
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(20, audioAttrs)
+            }
+        } catch (e: Exception) {}
     }
     val currentOnScroll by rememberUpdatedState(onScroll)
     var lastAngle by remember { mutableStateOf(0f) }
