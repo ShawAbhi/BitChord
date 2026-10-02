@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Classipod PIP's accessibility service. It only lends its overlay window
+  type so the PIP can float over the lock screen: no window content, no gestures,
+  and the one event type it must declare is one that is almost never sent.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/pod_accessibility_description"
+    android:summary="@string/pod_accessibility_summary"
+    android:accessibilityEventTypes="typeAnnouncement"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="0"
+    android:canRetrieveWindowContent="false"
+    android:isAccessibilityTool="false" />

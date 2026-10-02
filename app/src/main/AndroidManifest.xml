@@ -345,6 +345,21 @@
             android:exported="false">
         </activity>
 
+        <!-- Lends the Classipod PIP an accessibility overlay so it floats over the
+             native lock screen. Reads nothing; see PodAccessibilityService. -->
+        <service
+            android:name=".ui.classipod.PodAccessibilityService"
+            android:label="BitChord iPod"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/pod_accessibility_service" />
+        </service>
+
         <service
             android:name=".ui.classipod.FloatingPodService"
             android:exported="false" />

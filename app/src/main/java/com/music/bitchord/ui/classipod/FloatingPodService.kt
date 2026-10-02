@@ -78,6 +78,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.AndroidUiDispatcher
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -161,7 +162,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
          * been granted. Safe to call from any UI click handler.
          */
         fun start(context: Context) {
-            if (Settings.canDrawOverlays(context)) {
+            if (canShow(context)) {
                 context.startService(Intent(context, FloatingPodService::class.java))
             } else {
                 context.startActivity(
@@ -170,6 +171,13 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                 )
             }
         }
+
+        /**
+         * Whether there is a way to put the windows on screen: the lock-screen
+         * accessibility service, or the "Display over other apps" grant.
+         */
+        private fun canShow(context: Context) =
+            PodAccessibilityService.instance != null || Settings.canDrawOverlays(context)
 
         /** Closes the PIP and stops the service. */
         fun stop(context: Context) {
@@ -195,7 +203,27 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
      * right metrics and configuration (rotation, density) for its display.
      */
     private lateinit var uiContext: Context
+
+    /**
+     * The window manager of [uiContext]. Always used for screen metrics, and
+     * for the windows themselves while they are ordinary overlays.
+     */
+    private lateinit var overlayWindowManager: WindowManager
+
+    /**
+     * Where the windows currently live: [overlayWindowManager], or
+     * [PodAccessibilityService]'s window manager while that service is on, so
+     * the PIP floats over the lock screen too. See [rehost].
+     */
     private lateinit var windowManager: WindowManager
+
+    /** The window type the windows are added as; matches [windowManager]. */
+    private var windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+
+    private var windowsAdded = false
+
+    /** Registered with [PodAccessibilityService]; kept so it can be unregistered by identity. */
+    private val hostListener: () -> Unit = { rehost() }
 
     private var bubbleView: ComposeView? = null
     private var podView: View? = null
@@ -291,7 +319,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
 
         // Last line of defence: every launch path is meant to go through
         // [start], but an overlay without the grant throws from addView.
-        if (!Settings.canDrawOverlays(this)) {
+        if (!canShow(this)) {
             Log.w(TAG, "FloatingPodService started without overlay permission; stopping")
             stopSelf()
             return
@@ -308,10 +336,12 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         } else {
             this
         }
-        windowManager = uiContext.getSystemService(WINDOW_SERVICE) as WindowManager
+        overlayWindowManager = uiContext.getSystemService(WINDOW_SERVICE) as WindowManager
+        chooseHost()
 
         try {
             addWindows()
+            windowsAdded = true
         } catch (e: Exception) {
             // Permission revoked between the check and here, or an OEM refusing
             // the window type. Either way there is nothing to show.
@@ -320,6 +350,8 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
             return
         }
         isRunning.value = true
+        // Moves the windows as the lock-screen service is switched on or off.
+        PodAccessibilityService.onAvailabilityChanged = hostListener
 
         // Start on the right edge, a quarter of the way down, and pop in.
         val area = area()
@@ -328,6 +360,78 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         scope.launch {
             bubbleScale.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 400f))
         }
+    }
+
+    // ── Window host ──────────────────────────────────────────────────────
+
+    /**
+     * Picks where the windows go: the accessibility service when it is on
+     * (above everything, lock screen included), otherwise a normal overlay.
+     */
+    private fun chooseHost() {
+        val accessibility = PodAccessibilityService.instance
+        if (accessibility != null) {
+            windowManager = accessibility.getSystemService(WINDOW_SERVICE) as WindowManager
+            windowType = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            windowManager = overlayWindowManager
+            windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        }
+    }
+
+    /**
+     * Moves the windows to whichever host [chooseHost] now picks, keeping
+     * everything on them — position, size, the open iPod and its menu —
+     * because the compositions outlive their windows (see [keepComposition]).
+     *
+     * Called when the accessibility service is switched on or off while the
+     * PIP is open. Switched off with no overlay grant to fall back on, the PIP
+     * has nowhere to go and closes.
+     */
+    private fun rehost() {
+        if (!windowsAdded || dismissing) return
+        val oldManager = windowManager
+        val oldType = windowType
+        chooseHost()
+        if (windowType == oldType) return
+        if (windowType == WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY &&
+            !Settings.canDrawOverlays(this)
+        ) {
+            Log.w(TAG, "Lock-screen service off and no overlay grant; closing the PIP")
+            stopSelf()
+            return
+        }
+
+        // Same order as [addWindows], so the stacking stays the same.
+        val windows = listOf(
+            targetView to targetParams,
+            podView to podParams,
+            stageView to stageParams,
+            bubbleView to bubbleParams,
+        )
+        windows.forEach { (view, _) ->
+            // Already gone if the system tore the service's windows down with it.
+            if (view != null) runCatching { oldManager.removeViewImmediate(view) }
+        }
+        try {
+            windows.forEach { (view, params) ->
+                params.type = windowType
+                if (view != null) windowManager.addView(view, params)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not move the Classipod windows: ${e.message}")
+            stopSelf()
+        }
+    }
+
+    /**
+     * Keeps a ComposeView's composition alive while its window is removed and
+     * re-added by [rehost]; it is disposed with the service instead.
+     */
+    private fun ComposeView.keepComposition() {
+        setViewCompositionStrategy(
+            ViewCompositionStrategy.DisposeOnLifecycleDestroyed(this@FloatingPodService),
+        )
     }
 
     private fun addWindows() {
@@ -357,6 +461,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
             setViewTreeViewModelStoreOwner(this@FloatingPodService)
             setViewTreeSavedStateRegistryOwner(this@FloatingPodService)
             podContent = ComposeView(uiContext).apply {
+                keepComposition()
                 setContent {
                     BitChordTheme {
                         PodPanel(
@@ -1217,7 +1322,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
     /** The part of the screen clear of the system bars and cutouts, in px. */
     private fun area(): Area {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val metrics = windowManager.currentWindowMetrics
+            val metrics = overlayWindowManager.currentWindowMetrics
             val insets = metrics.windowInsets.getInsetsIgnoringVisibility(
                 WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
             )
@@ -1231,7 +1336,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         }
         val real = DisplayMetrics()
         @Suppress("DEPRECATION")
-        windowManager.defaultDisplay.getRealMetrics(real)
+        overlayWindowManager.defaultDisplay.getRealMetrics(real)
         return Area(
             left = 0f,
             top = systemDimen("status_bar_height"),
@@ -1253,7 +1358,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         WindowManager.LayoutParams(
             width,
             height,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            windowType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -1275,6 +1380,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         setViewTreeLifecycleOwner(this@FloatingPodService)
         setViewTreeViewModelStoreOwner(this@FloatingPodService)
         setViewTreeSavedStateRegistryOwner(this@FloatingPodService)
+        keepComposition()
         setContent { BitChordTheme { content() } }
     }
 
@@ -1293,6 +1399,9 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
 
     override fun onDestroy() {
         isRunning.value = false
+        if (PodAccessibilityService.onAvailabilityChanged === hostListener) {
+            PodAccessibilityService.onAvailabilityChanged = null
+        }
         scope.cancel()
         velocityTracker?.recycle()
         velocityTracker = null
