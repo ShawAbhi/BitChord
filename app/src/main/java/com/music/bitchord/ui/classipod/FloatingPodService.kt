@@ -1,43 +1,44 @@
 package com.music.bitchord.ui.classipod
 
-import android.animation.ValueAnimator
 import android.app.Service
 import android.content.Intent
 import android.content.res.Resources
 import android.graphics.PixelFormat
 import android.os.IBinder
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.WindowManager
-import android.view.animation.DecelerateInterpolator
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.PointerInputChange
-import androidx.compose.foundation.Image
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.*
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
@@ -65,12 +66,6 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
     override val viewModelStore: ViewModelStore get() = store
     override val savedStateRegistry: SavedStateRegistry get() = savedStateRegistryController.savedStateRegistry
 
-    private var isExpandedState = false
-    private val screenWidth = Resources.getSystem().displayMetrics.widthPixels
-    private val collapsedSizePx = (64 * Resources.getSystem().displayMetrics.density).roundToInt()
-    private var toggleExpansion: (() -> Unit)? = null
-    private var closeExpansion: (() -> Unit)? = null
-
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -83,6 +78,9 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         
+        val screenWidth = Resources.getSystem().displayMetrics.widthPixels
+        val screenHeight = Resources.getSystem().displayMetrics.heightPixels
+
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -91,7 +89,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = screenWidth // Start on the right edge
+            x = screenWidth // Handled by Compose now
             y = 200
         }
 
@@ -104,111 +102,159 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                 BitChordTheme {
                     val controller = rememberMediaController()
                     val playerState = rememberPlayerState(controller)
-                    var isExpanded by remember { mutableStateOf(false) }
+                    val density = LocalDensity.current
                     
-                    // Expose a way for the touch listener to toggle expansion
+                    var isExpanded by remember { mutableStateOf(true) }
+                    
+                    var expandedWidthDp by remember { mutableStateOf(320.dp) }
+                    var expandedHeightDp by remember { mutableStateOf(620.dp) }
+                    
+                    val collapsedSizePx = with(density) { 64.dp.toPx() }
+                    
+                    val expansionProgress = remember { Animatable(if (isExpanded) 1f else 0f) }
+
+                    // Track absolute center coordinate of the window so it expands/collapses from center
+                    var centerX by remember { mutableStateOf(screenWidth - with(density) { 320.dp.toPx() } / 2f) }
+                    var centerY by remember { mutableStateOf(200f + with(density) { 620.dp.toPx() } / 2f) }
+                    
+                    // Allow external toggles
                     SideEffect {
                         this@FloatingPodService.toggleExpansion = { isExpanded = !isExpanded }
                         this@FloatingPodService.closeExpansion = { isExpanded = false }
                     }
 
-                    SideEffect {
-                        if (isExpandedState != isExpanded) {
-                            isExpandedState = isExpanded
-                            if (isExpanded) {
-                                ensureFullyVisible()
-                            } else {
-                                handleCollapseRelease()
-                            }
+                    LaunchedEffect(isExpanded) {
+                        expansionProgress.animateTo(
+                            targetValue = if (isExpanded) 1f else 0f,
+                            animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
+                        )
+                        if (!isExpanded) {
+                            // Snap to edges when collapsed
+                            val leftDist = centerX
+                            val rightDist = screenWidth - centerX
+                            centerX = if (leftDist < rightDist) collapsedSizePx / 2f else screenWidth - collapsedSizePx / 2f
+                        } else {
+                            // Ensure fully visible when expanded
+                            val halfW = with(density) { expandedWidthDp.toPx() } / 2f
+                            if (centerX - halfW < 0) centerX = halfW
+                            if (centerX + halfW > screenWidth) centerX = screenWidth - halfW
                         }
                     }
+                    
+                    val expandedWidthPx = with(density) { expandedWidthDp.toPx() }
+                    val expandedHeightPx = with(density) { expandedHeightDp.toPx() }
 
+                    // Sync window size and position dynamically
+                    LaunchedEffect(expansionProgress.value, centerX, centerY, expandedWidthPx, expandedHeightPx) {
+                        val currentWidthPx = collapsedSizePx + (expandedWidthPx - collapsedSizePx) * expansionProgress.value
+                        val currentHeightPx = collapsedSizePx + (expandedHeightPx - collapsedSizePx) * expansionProgress.value
+                        
+                        params.x = (centerX - currentWidthPx / 2f).roundToInt()
+                        params.y = (centerY - currentHeightPx / 2f).roundToInt()
+                        
+                        try {
+                            windowManager.updateViewLayout(composeView, params)
+                        } catch (e: Exception) {}
+                    }
 
                     val dragModifier = Modifier.pointerInput(Unit) {
                         detectDragGestures(
-                            onDragStart = { },
-                            onDrag = { change: PointerInputChange, dragAmount: Offset ->
+                            onDrag = { change, dragAmount ->
                                 change.consume()
-                                params.x += dragAmount.x.roundToInt()
-                                params.y += dragAmount.y.roundToInt()
+                                centerX += dragAmount.x
+                                centerY += dragAmount.y
+                            }
+                        )
+                    }
+                    
+                    val resizeModifier = Modifier.pointerInput(Unit) {
+                        detectDragGestures(
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val dragXDp = with(density) { dragAmount.x.toDp() }
+                                val dragYDp = with(density) { dragAmount.y.toDp() }
                                 
-                                if (!isExpandedState) {
-                                    if (params.x < -collapsedSizePx / 2) params.x = -collapsedSizePx / 2
-                                    if (params.x > screenWidth - collapsedSizePx / 2) params.x = screenWidth - collapsedSizePx / 2
-                                }
+                                expandedWidthDp = (expandedWidthDp + dragXDp).coerceIn(200.dp, 600.dp)
+                                expandedHeightDp = (expandedHeightDp + dragYDp).coerceIn(400.dp, 1000.dp)
                                 
-                                windowManager.updateViewLayout(composeView, params)
-                            },
-                            onDragEnd = {
-                                if (!isExpandedState) {
-                                    handleCollapseRelease()
-                                } else {
-                                    ensureFullyVisible()
-                                }
+                                centerX += dragAmount.x / 2f
+                                centerY += dragAmount.y / 2f
                             }
                         )
                     }
 
-                    if (!isExpanded) {
-                        // Collapsed Bubble styled like an adaptive app icon
-                        val isDark = isSystemInDarkTheme()
-                        val containerColor = if (isDark) {
-                            Color(0xFF202124) // Google / Material dark surface
-                        } else {
-                            Color.White
-                        }
-                        val borderColor = if (isDark) {
-                            Color(0x33FFFFFF)
-                        } else {
-                            Color(0x1F000000)
-                        }
-                        
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .then(dragModifier)
-                                .shadow(
-                                    elevation = 6.dp,
-                                    shape = CircleShape,
-                                    clip = false
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = borderColor,
-                                    shape = CircleShape
-                                )
-                                .background(containerColor, CircleShape)
-                                .clickable { isExpanded = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ipod_icon_white),
-                                contentDescription = "Pod",
-                                modifier = Modifier.size(34.dp),
-                                tint = if (isDark) Color.White else Color(0xFF1F1F1F)
-                            )
-                        }
-                    } else {
-                        // Expanded UI
-                        Box(
-                            modifier = Modifier
-                                .size(width = 320.dp, height = 620.dp)
-                                .padding(start = 24.dp, top = 32.dp, end = 24.dp, bottom = 56.dp)
-                        ) {
-                            // Only the body of the iPod should be draggable, not the whole invisible canvas.
-                            Box(modifier = dragModifier.fillMaxSize()) {
-                                ClassipodApp(controller, playerState)
-                            }
-                            // Close button floating outside the main body
+                    val currentWidthDp = 64.dp + (expandedWidthDp - 64.dp) * expansionProgress.value
+                    val currentHeightDp = 64.dp + (expandedHeightDp - 64.dp) * expansionProgress.value
+
+                    Box(
+                        modifier = Modifier.size(currentWidthDp, currentHeightDp)
+                    ) {
+                        // Collapsed Icon (fades out as it expands)
+                        if (expansionProgress.value < 1f) {
+                            val isDark = isSystemInDarkTheme()
                             Box(
                                 modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(30.dp)
-                                    .background(Color(0x99000000), CircleShape)
-                                    .clickable { closeExpansion?.invoke() },
+                                    .fillMaxSize()
+                                    .then(dragModifier)
+                                    .alpha(1f - expansionProgress.value)
+                                    .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
+                                    .background(if (isDark) Color(0xFF202124) else Color.White, CircleShape)
+                                    .border(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x1F000000), CircleShape)
+                                    .clickable { isExpanded = true },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("X", color = Color.White, fontWeight = FontWeight.Bold)
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ipod_icon_white),
+                                    contentDescription = "Pod",
+                                    modifier = Modifier.size(34.dp),
+                                    tint = if (isDark) Color.White else Color(0xFF1F1F1F)
+                                )
+                            }
+                        }
+
+                        // Expanded App UI (fades in and scales slightly for pop effect)
+                        if (expansionProgress.value > 0f) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .alpha(expansionProgress.value)
+                                    .graphicsLayer {
+                                        val scale = 0.8f + 0.2f * expansionProgress.value
+                                        scaleX = scale
+                                        scaleY = scale
+                                    }
+                                    .padding(start = 24.dp, top = 32.dp, end = 24.dp, bottom = 56.dp)
+                            ) {
+                                Box(modifier = dragModifier.fillMaxSize()) {
+                                    ClassipodApp(controller, playerState)
+                                }
+                                
+                                // Close button floating outside the main body
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(30.dp)
+                                        .background(Color(0x99000000), CircleShape)
+                                        .clickable { isExpanded = false },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("X", color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                                
+                                // Resize handle at bottom right
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .offset(x = 12.dp, y = 36.dp)
+                                        .size(48.dp)
+                                        .then(resizeModifier),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    androidx.compose.foundation.Canvas(modifier = Modifier.size(16.dp)) {
+                                        drawLine(Color.Gray, start = Offset(8f, 16f), end = Offset(16f, 8f), strokeWidth = 4f)
+                                        drawLine(Color.Gray, start = Offset(0f, 16f), end = Offset(16f, 0f), strokeWidth = 4f)
+                                    }
+                                }
                             }
                         }
                     }
@@ -217,46 +263,10 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         }
 
         windowManager.addView(composeView, params)
-        // Start fully visible by default
-        ensureFullyVisible()
     }
 
-    private fun handleCollapseRelease() {
-        // If user drags it off the left edge, bury it half-way on the left
-        if (params.x < 0) {
-            animateWindowX(-collapsedSizePx / 2)
-        } 
-        // If user drags it off the right edge, bury it half-way on the right
-        else if (params.x > screenWidth - collapsedSizePx) {
-            animateWindowX(screenWidth - collapsedSizePx / 2)
-        }
-        // Otherwise, leave it exactly where they dropped it!
-    }
-
-    private fun ensureFullyVisible() {
-        val expandedWidth = (320 * Resources.getSystem().displayMetrics.density).roundToInt()
-        var targetX = params.x
-        if (targetX < 0) targetX = 0
-        if (targetX + expandedWidth > screenWidth) {
-            targetX = screenWidth - expandedWidth
-        }
-        if (targetX != params.x) {
-            animateWindowX(targetX)
-        }
-    }
-
-    private fun animateWindowX(targetX: Int) {
-        val animator = ValueAnimator.ofInt(params.x, targetX)
-        animator.duration = 250
-        animator.interpolator = DecelerateInterpolator()
-        animator.addUpdateListener { animation ->
-            params.x = animation.animatedValue as Int
-            try {
-                windowManager.updateViewLayout(composeView, params)
-            } catch (e: Exception) {}
-        }
-        animator.start()
-    }
+    private var toggleExpansion: (() -> Unit)? = null
+    private var closeExpansion: (() -> Unit)? = null
 
     override fun onDestroy() {
         super.onDestroy()
