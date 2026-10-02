@@ -224,78 +224,80 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        // The visibly scaling animated box
-                        val currentWidthDp = 64.dp + (expandedWidthDp - 64.dp) * expansionProgress.value
-                        val currentHeightDp = 64.dp + (expandedHeightDp - 64.dp) * expansionProgress.value
-
+                        // Expanded App UI container (fixed size to avoid expensive relayouts during animation)
                         Box(
-                            modifier = Modifier.size(currentWidthDp, currentHeightDp)
+                            modifier = Modifier
+                                .size(expandedWidthDp, expandedHeightDp)
+                                .graphicsLayer {
+                                    val currentWidthPx = 64.dp.toPx() + (expandedWidthDp.toPx() - 64.dp.toPx()) * expansionProgress.value
+                                    val currentHeightPx = 64.dp.toPx() + (expandedHeightDp.toPx() - 64.dp.toPx()) * expansionProgress.value
+                                    
+                                    scaleX = currentWidthPx / expandedWidthDp.toPx()
+                                    scaleY = currentHeightPx / expandedHeightDp.toPx()
+                                    alpha = expansionProgress.value
+                                }
                         ) {
-                            // Collapsed Icon
-                            if (expansionProgress.value < 1f) {
-                                val isDark = isSystemInDarkTheme()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(start = 24.dp, top = 32.dp, end = 24.dp, bottom = 56.dp)
+                            ) {
+                                Box(modifier = dragModifier.fillMaxSize()) {
+                                    ClassipodApp(controller, playerState)
+                                }
+                                
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxSize()
-                                        .then(dragModifier)
-                                        .alpha(1f - expansionProgress.value)
-                                        .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
-                                        .background(if (isDark) Color(0xFF202124) else Color.White, CircleShape)
-                                        .border(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x1F000000), CircleShape)
-                                        .clickable { isExpanded = true },
+                                        .align(Alignment.TopEnd)
+                                        .size(30.dp)
+                                        .background(Color(0x99000000), CircleShape)
+                                        .clickable { isExpanded = false },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ipod_icon_white),
-                                        contentDescription = "Pod",
-                                        modifier = Modifier.size(34.dp),
-                                        tint = if (isDark) Color.White else Color(0xFF1F1F1F)
-                                    )
+                                    Text("X", color = Color.White, fontWeight = FontWeight.Bold)
                                 }
-                            }
-
-                            // Expanded App UI
-                            if (expansionProgress.value > 0f) {
+                                
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxSize()
-                                        .alpha(expansionProgress.value)
-                                        .graphicsLayer {
-                                            val scale = 0.8f + 0.2f * expansionProgress.value
-                                            scaleX = scale
-                                            scaleY = scale
-                                        }
-                                        .padding(start = 24.dp, top = 32.dp, end = 24.dp, bottom = 56.dp)
+                                        .align(Alignment.BottomEnd)
+                                        .offset(x = 12.dp, y = 36.dp)
+                                        .size(48.dp)
+                                        .then(resizeModifier),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(modifier = dragModifier.fillMaxSize()) {
-                                        ClassipodApp(controller, playerState)
-                                    }
-                                    
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .size(30.dp)
-                                            .background(Color(0x99000000), CircleShape)
-                                            .clickable { isExpanded = false },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text("X", color = Color.White, fontWeight = FontWeight.Bold)
-                                    }
-                                    
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .offset(x = 12.dp, y = 36.dp)
-                                            .size(48.dp)
-                                            .then(resizeModifier),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        androidx.compose.foundation.Canvas(modifier = Modifier.size(16.dp)) {
-                                            drawLine(Color.Gray, start = Offset(8f, 16f), end = Offset(16f, 8f), strokeWidth = 4f)
-                                            drawLine(Color.Gray, start = Offset(0f, 16f), end = Offset(16f, 0f), strokeWidth = 4f)
-                                        }
+                                    androidx.compose.foundation.Canvas(modifier = Modifier.size(16.dp)) {
+                                        drawLine(Color.Gray, start = Offset(8f, 16f), end = Offset(16f, 8f), strokeWidth = 4f)
+                                        drawLine(Color.Gray, start = Offset(0f, 16f), end = Offset(16f, 0f), strokeWidth = 4f)
                                     }
                                 }
+                            }
+                        }
+
+                        // Collapsed Icon container
+                        if (expansionProgress.value < 1f) {
+                            val isDark = isSystemInDarkTheme()
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .graphicsLayer {
+                                        alpha = 1f - expansionProgress.value
+                                        val scale = 1f + 0.5f * expansionProgress.value
+                                        scaleX = scale
+                                        scaleY = scale
+                                    }
+                                    .then(dragModifier)
+                                    .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
+                                    .background(if (isDark) Color(0xFF202124) else Color.White, CircleShape)
+                                    .border(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x1F000000), CircleShape)
+                                    .clickable { isExpanded = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ipod_icon_white),
+                                    contentDescription = "Pod",
+                                    modifier = Modifier.size(34.dp),
+                                    tint = if (isDark) Color.White else Color(0xFF1F1F1F)
+                                )
                             }
                         }
                     }
