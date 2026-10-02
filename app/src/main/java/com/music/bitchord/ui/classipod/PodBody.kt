@@ -76,7 +76,7 @@ internal data class PodFinish(
             bodyBottom = Color(0xFF262527),
             screen = Color(0xFF121212),
             screenBezel = null,
-            screenGlare = true,
+            screenGlare = false, // No glare, to match the White finish.
             wheel = Color(0xFF212122),
             wheelStroke = null,
             centerTop = Color(0xFF282829),
@@ -270,45 +270,3 @@ internal fun DrawScope.drawScreenGlare(unit: Float) {
     )
 }
 
-// ── CRT ──────────────────────────────────────────────────────────────────
-
-/** Darkness of each scanline, 0–1. */
-internal const val CRT_SCANLINE_ALPHA = 0.22f
-/** Scanline pitch in pixels: one dark line every this many. */
-internal const val CRT_SCANLINE_PITCH_PX = 3f
-/** How dark the corners get, 0–1. */
-internal const val CRT_VIGNETTE_ALPHA = 0.38f
-
-/**
- * A CRT look over the display, on top of whatever the screen draws itself:
- *  - **Scanlines** — a dark line every [CRT_SCANLINE_PITCH_PX] pixels, with
- *    a faint light line between, the way phosphor rows read on a tube.
- *  - **Vignette** — the edges and corners fall off into shadow.
- *  - **Glass** — a soft highlight along the top, as off a curved face.
- */
-internal fun DrawScope.drawCrt() {
-    val pitch = CRT_SCANLINE_PITCH_PX
-    var y = 0f
-    val dark = Color.Black.copy(alpha = CRT_SCANLINE_ALPHA)
-    val light = Color.White.copy(alpha = CRT_SCANLINE_ALPHA * 0.25f)
-    while (y < size.height) {
-        drawRect(dark, topLeft = Offset(0f, y), size = Size(size.width, 1f))
-        drawRect(light, topLeft = Offset(0f, y + 1f), size = Size(size.width, 1f))
-        y += pitch
-    }
-    drawRect(
-        brush = Brush.radialGradient(
-            0.55f to Color.Transparent,
-            1f to Color.Black.copy(alpha = CRT_VIGNETTE_ALPHA),
-            center = center,
-            radius = size.maxDimension * 0.62f,
-        ),
-    )
-    drawRect(
-        brush = Brush.verticalGradient(
-            listOf(Color.White.copy(alpha = 0.10f), Color.Transparent),
-            startY = 0f,
-            endY = size.height * 0.35f,
-        ),
-    )
-}

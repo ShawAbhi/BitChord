@@ -6,6 +6,10 @@ import androidx.compose.runtime.mutableStateOf
 data class MenuItem(
     val title: String,
     val hasArrow: Boolean = true,
+    /** A second line, e.g. the artist. */
+    val subtitle: String? = null,
+    /** Cover art, for [PodCoverFlow]. */
+    val artworkUrl: String? = null,
     val onClick: () -> Unit
 )
 
@@ -16,6 +20,15 @@ class PodMenuState {
     var title = mutableStateOf("BitChord")
     var items = mutableStateListOf<MenuItem>()
     var selectedIndex = mutableStateOf(0)
+
+    /** The item that is playing now, marked in [PodCoverFlow]; -1 for none. */
+    var playingIndex = mutableStateOf(-1)
+
+    /** The music volume, 0–1, as last set from the wheel on Now Playing. */
+    var volume = mutableStateOf(0f)
+
+    /** Bumped on every wheel turn on Now Playing, so the volume bar shows itself. */
+    var volumeTouches = mutableStateOf(0)
     
     val history = mutableListOf<MenuSnapshot>()
 

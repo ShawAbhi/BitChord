@@ -39,7 +39,12 @@ fun ClassipodApp(
         menuState.title.value = "Playlist"
         
         val queueItems = playerState.queue.mapIndexed { index, song ->
-            MenuItem(song.title.take(30) + if(song.title.length > 30) "..." else "", hasArrow = false) {
+            MenuItem(
+                title = song.title,
+                hasArrow = false,
+                subtitle = song.artist,
+                artworkUrl = song.thumbnailUrl,
+            ) {
                 controller?.seekToDefaultPosition(index)
                 controller?.play()
                 menuState.isNowPlaying.value = true
@@ -47,12 +52,22 @@ fun ClassipodApp(
         }
         val newItems = queueItems.ifEmpty { listOf(MenuItem("Empty", false) {}) }
         
+        // Opening on a fresh queue, start the flow at the song that's playing.
+        val firstFill = menuState.items.isEmpty() || menuState.items.singleOrNull()?.title == "Empty"
+        if (firstFill && queueItems.isNotEmpty()) {
+            menuState.selectedIndex.value = playerState.queueIndex
+        }
+
         // We are no longer using nested menus, so just set the items directly
         menuState.items.clear()
         menuState.items.addAll(newItems)
         
         // Keep selection within bounds
         menuState.selectedIndex.value = menuState.selectedIndex.value.coerceIn(0, (newItems.size - 1).coerceAtLeast(0))
+    }
+
+    LaunchedEffect(playerState.queueIndex, playerState.queue) {
+        menuState.playingIndex.value = if (playerState.queue.isEmpty()) -1 else playerState.queueIndex
     }
 
     val finish = rememberPodFinish()
@@ -95,13 +110,10 @@ fun ClassipodApp(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(unit * 3f))
-                        // A stronger CRT look laid over the display: denser,
-                        // darker scanlines and a deeper vignette. See [drawCrt].
-                        .drawWithContent {
-                            drawContent()
-                            drawCrt()
-                        },
+                        // No CRT overlay: it was redrawn over the whole display on
+                        // every frame of Cover Flow, for a look the dark screen no
+                        // longer needs.
+                        .clip(RoundedCornerShape(unit * 3f)),
                 ) {
                     PodScreen(controller, playerState, menuState)
                 }
@@ -132,6 +144,10 @@ fun ClassipodApp(
                                 val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
                                 val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                                 val newVol = (currentVol + ticks).coerceIn(0, maxVol)
+                                // Shown even when already at the end stop, so a turn
+                                // that does nothing still says why.
+                                menuState.volume.value = if (maxVol > 0) newVol / maxVol.toFloat() else 0f
+                                menuState.volumeTouches.value++
                                 if (currentVol != newVol) {
                                     audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
                                     true

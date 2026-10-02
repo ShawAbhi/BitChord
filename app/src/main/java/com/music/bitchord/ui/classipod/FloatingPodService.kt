@@ -51,6 +51,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
@@ -78,6 +80,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.AndroidUiDispatcher
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration as ComposeViewConfiguration
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.IntOffset
@@ -1558,6 +1562,23 @@ private fun PodPanel(
     val captureLayer = rememberGraphicsLayer()
     SideEffect { onLayer(captureLayer) }
 
+    // Dragging the body moves the iPod; dragging round the wheel scrolls. Both
+    // wait for the finger to pass the touch slop, and whichever gets there
+    // first takes the gesture. The body measures in screen pixels, but the
+    // wheel sits inside the iPod's scale layer and measures in the iPod's own
+    // units — so on an iPod bigger than default, the same finger movement
+    // reached the body's slop first and every spin became a drag: the wheel
+    // "stopped working" at large sizes. The body is given a wider slop, so the
+    // wheel wins at any size up to [BODY_DRAG_SLOP_FACTOR]×, and everything
+    // inside gets the normal one back.
+    val viewConfiguration = LocalViewConfiguration.current
+    val bodyDragConfiguration = remember(viewConfiguration) {
+        object : ComposeViewConfiguration by viewConfiguration {
+            override val touchSlop: Float = viewConfiguration.touchSlop * BODY_DRAG_SLOP_FACTOR
+        }
+    }
+
+    CompositionLocalProvider(LocalViewConfiguration provides bodyDragConfiguration) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1628,10 +1649,19 @@ private fun PodPanel(
                     }
                 },
         ) {
-            ClassipodApp(controller, playerState)
+            CompositionLocalProvider(LocalViewConfiguration provides viewConfiguration) {
+                ClassipodApp(controller, playerState)
+            }
         }
     }
+    }
 }
+
+/**
+ * How much further the finger must move to drag the iPod than to turn its
+ * wheel. Must exceed [MAX_POD_SCALE] for the wheel to win at every size.
+ */
+private const val BODY_DRAG_SLOP_FACTOR = 2f
 
 /**
  * The stand-in drawn while the iPod is resized from its bottom-left corner:
