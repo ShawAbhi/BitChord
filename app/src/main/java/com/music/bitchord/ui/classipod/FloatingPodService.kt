@@ -126,40 +126,82 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                     
                     val scope = rememberCoroutineScope()
 
+                    // Variables to track translation during animation
+                    var collapsedOffsetX by remember { mutableStateOf(0f) }
+                    var collapsedOffsetY by remember { mutableStateOf(0f) }
+
                     LaunchedEffect(isExpanded) {
+                        val newWidthPx = with(density) { expandedWidthDp.toPx() }
+                        val newHeightPx = with(density) { expandedHeightDp.toPx() }
+                        
                         if (isExpanded) {
-                            // 1. Immediately expand the invisible WindowManager bounds to hold the animation
-                            params.width = with(density) { expandedWidthDp.toPx() }.roundToInt()
-                            params.height = with(density) { expandedHeightDp.toPx() }.roundToInt()
+                            // 1. Capture old visual center
+                            val oldCenterX = windowX + collapsedSizePx / 2f
+                            val oldCenterY = windowY + collapsedSizePx / 2f
+                            
+                            // 2. Calculate new window bounds so it fits on screen
+                            var targetWindowX = windowX
+                            if (targetWindowX + newWidthPx > screenWidth) targetWindowX = (screenWidth - newWidthPx).toFloat()
+                            if (targetWindowX < 0) targetWindowX = 0f
+                            
+                            var targetWindowY = windowY
+                            if (targetWindowY + newHeightPx > screenHeight) targetWindowY = (screenHeight - newHeightPx).toFloat()
+                            if (targetWindowY < 0) targetWindowY = 0f
+                            
+                            val newCenterX = targetWindowX + newWidthPx / 2f
+                            val newCenterY = targetWindowY + newHeightPx / 2f
+                            
+                            // 3. Anchor visual translation
+                            collapsedOffsetX = oldCenterX - newCenterX
+                            collapsedOffsetY = oldCenterY - newCenterY
+                            
+                            // 4. Update window
+                            windowX = targetWindowX
+                            windowY = targetWindowY
+                            params.x = windowX.roundToInt()
+                            params.y = windowY.roundToInt()
+                            params.width = newWidthPx.roundToInt()
+                            params.height = newHeightPx.roundToInt()
                             try {
                                 windowManager.updateViewLayout(composeView, params)
                             } catch (e: Exception) {}
                             
-                            // 2. Run the smooth Compose visual animation
+                            // 5. Run animation
                             expansionProgress.animateTo(
                                 targetValue = 1f,
                                 animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
                             )
                         } else {
-                            // 1. Run the smooth Compose visual animation first
+                            // 1. Pre-calculate the collapsed position
+                            val currentCenterX = windowX + newWidthPx / 2f
+                            val currentCenterY = windowY + newHeightPx / 2f
+                            
+                            // Snap to edge
+                            val targetCollapsedX = if (currentCenterX < screenWidth / 2) 0f else (screenWidth - collapsedSizePx).toFloat()
+                            val targetCollapsedY = windowY + (newHeightPx - collapsedSizePx) / 2f
+                            
+                            val targetCenterX = targetCollapsedX + collapsedSizePx / 2f
+                            val targetCenterY = targetCollapsedY + collapsedSizePx / 2f
+                            
+                            collapsedOffsetX = targetCenterX - currentCenterX
+                            collapsedOffsetY = targetCenterY - currentCenterY
+                            
+                            // 2. Animate visual UI to the edge
                             expansionProgress.animateTo(
                                 targetValue = 0f,
                                 animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f)
                             )
                             
-                            // 2. Once animation reaches 0, snap the WindowManager bounds down to small size
+                            // 3. Once animation reaches 0, snap the physical WindowManager bounds
+                            windowX = targetCollapsedX
+                            windowY = targetCollapsedY
+                            params.x = windowX.roundToInt()
+                            params.y = windowY.roundToInt()
                             params.width = collapsedSizePx.roundToInt()
                             params.height = collapsedSizePx.roundToInt()
                             
-                            // Optional: snap to edge
-                            val screenHalfWidth = screenWidth / 2f
-                            val absoluteX = screenHalfWidth + windowX
-                            if (absoluteX < screenHalfWidth) {
-                                windowX = -screenHalfWidth + collapsedSizePx / 2f
-                            } else {
-                                windowX = screenHalfWidth - collapsedSizePx / 2f
-                            }
-                            params.x = windowX.roundToInt()
+                            collapsedOffsetX = 0f
+                            collapsedOffsetY = 0f
                             
                             try {
                                 windowManager.updateViewLayout(composeView, params)
@@ -235,6 +277,9 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                                     scaleX = currentWidthPx / expandedWidthDp.toPx()
                                     scaleY = currentHeightPx / expandedHeightDp.toPx()
                                     alpha = expansionProgress.value
+                                    
+                                    translationX = collapsedOffsetX * (1f - expansionProgress.value)
+                                    translationY = collapsedOffsetY * (1f - expansionProgress.value)
                                 }
                         ) {
                             Box(
@@ -284,6 +329,9 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                                         val scale = 1f + 0.5f * expansionProgress.value
                                         scaleX = scale
                                         scaleY = scale
+                                        
+                                        translationX = collapsedOffsetX * (1f - expansionProgress.value)
+                                        translationY = collapsedOffsetY * (1f - expansionProgress.value)
                                     }
                                     .then(dragModifier)
                                     .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
