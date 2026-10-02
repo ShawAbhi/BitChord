@@ -15,6 +15,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.media3.session.MediaController
 import com.music.bitchord.playback.PlayerState
@@ -49,6 +52,9 @@ fun ClassipodApp(
     }
 
     // Outer Body (Pure white minimalist style)
+    CompositionLocalProvider(
+        LocalDensity provides Density(density = LocalDensity.current.density, fontScale = 1f)
+    ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -149,5 +155,6 @@ fun ClassipodApp(
                 )
             }
         }
+    }
     }
 }
