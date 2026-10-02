@@ -336,10 +336,12 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- Invisible permission trampoline for the Classipod window. -->
         <activity
             android:name=".ui.classipod.ClassipodActivity"
             android:label="BitChord Pod"
-            android:theme="@style/Theme.BitChord"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
             android:exported="false">
         </activity>
 

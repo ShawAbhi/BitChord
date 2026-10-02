@@ -221,6 +221,7 @@ import com.music.bitchord.ui.components.QueueActionNoticeHost
 import com.music.bitchord.ui.components.TopBarAccountButton
 import com.music.bitchord.ui.components.TopBarBlur
 import com.music.bitchord.ui.components.TopFadeBlur
+import com.music.bitchord.ui.classipod.PodLauncherButton
 import com.music.bitchord.ui.components.TopBarDownloadButton
 import com.music.bitchord.ui.components.optimizedHazeEffect
 import com.music.bitchord.ui.components.topBarContentPadding
@@ -403,7 +404,6 @@ private fun BitChordApp(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val hazeState = remember { HazeState() }
-        val isPodPipActive by com.music.bitchord.ui.classipod.FloatingPodService.isRunning
     // Recording the backdrop layer costs a draw pass, so it only runs when a
     // liquid-glass surface (the nav bar or artwork-page back button) can sample it.
     val glassActive = LocalLiquidGlassEnabled.current && isGlassSupported()
@@ -3310,43 +3310,10 @@ private fun BitChordApp(
                             onBlockedControl = showHostOnlyNotice,
                             modifier = Modifier.weight(1f),
                         )
-                        val context = androidx.compose.ui.platform.LocalContext.current
-                        androidx.compose.animation.AnimatedVisibility(
-                            visible = !isPodPipActive,
-                            enter = androidx.compose.animation.expandHorizontally(expandFrom = Alignment.End) + androidx.compose.animation.fadeIn(),
-                            exit = androidx.compose.animation.shrinkHorizontally(shrinkTowards = Alignment.End) + androidx.compose.animation.fadeOut()
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Spacer(Modifier.width(0.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(56.dp)
-                                .clip(androidx.compose.foundation.shape.CircleShape)
-                                .optimizedHazeEffect(
-                                    state = hazeState,
-                                    style = dev.chrisbanes.haze.materials.HazeMaterials.regular(androidx.compose.material3.MaterialTheme.colorScheme.surface),
-                                )
-                                .border(
-                                    com.music.bitchord.ui.components.GLASS_EDGE_WIDTH, 
-                                    com.music.bitchord.ui.components.GLASS_EDGE_COLOR, 
-                                    androidx.compose.foundation.shape.CircleShape
-                                )
-                                .clickable {
-                                            val intent = android.content.Intent(context, com.music.bitchord.ui.classipod.FloatingPodService::class.java)
-                                            context.startService(intent)
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    androidx.compose.material3.Icon(
-                                        painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon_white),
-                                        contentDescription = "Open iPod",
-                                        modifier = Modifier.size(22.dp),
-                                        tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                Spacer(Modifier.width(16.dp))
-                            }
-                        }
+                        PodLauncherButton(
+                            glass = glassActive,
+                            hazeState = hazeState,
+                        )
                     }
                 } else Column(
                     modifier = Modifier
@@ -3382,43 +3349,10 @@ private fun BitChordApp(
                                 onBlockedControl = showHostOnlyNotice,
                                 modifier = Modifier.weight(1f),
                             )
-                            val context = androidx.compose.ui.platform.LocalContext.current
-                        androidx.compose.animation.AnimatedVisibility(
-                            visible = !isPodPipActive,
-                            enter = androidx.compose.animation.expandHorizontally(expandFrom = Alignment.End) + androidx.compose.animation.fadeIn(),
-                            exit = androidx.compose.animation.shrinkHorizontally(shrinkTowards = Alignment.End) + androidx.compose.animation.fadeOut()
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Spacer(Modifier.width(0.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(56.dp)
-                                .clip(androidx.compose.foundation.shape.CircleShape)
-                                .optimizedHazeEffect(
-                                    state = hazeState,
-                                    style = dev.chrisbanes.haze.materials.HazeMaterials.regular(androidx.compose.material3.MaterialTheme.colorScheme.surface),
-                                )
-                                .border(
-                                    com.music.bitchord.ui.components.GLASS_EDGE_WIDTH, 
-                                    com.music.bitchord.ui.components.GLASS_EDGE_COLOR, 
-                                    androidx.compose.foundation.shape.CircleShape
-                                )
-                                .clickable {
-                                            val intent = android.content.Intent(context, com.music.bitchord.ui.classipod.FloatingPodService::class.java)
-                                            context.startService(intent)
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    androidx.compose.material3.Icon(
-                                        painter = androidx.compose.ui.res.painterResource(R.drawable.ipod_icon_white),
-                                        contentDescription = "Open iPod",
-                                        modifier = Modifier.size(22.dp),
-                                        tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                Spacer(Modifier.width(16.dp))
-                            }
-                        }
+                            PodLauncherButton(
+                                glass = glassActive,
+                                hazeState = hazeState,
+                            )
                         }
                         Spacer(Modifier.height(8.dp))
                     }
