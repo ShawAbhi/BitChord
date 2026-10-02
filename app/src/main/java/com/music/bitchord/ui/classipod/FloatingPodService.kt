@@ -81,6 +81,8 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         
         val screenWidth = Resources.getSystem().displayMetrics.widthPixels
         val screenHeight = Resources.getSystem().displayMetrics.heightPixels
+        val collapsedSizePx = (64 * Resources.getSystem().displayMetrics.density).roundToInt()
+        val initialX = (screenWidth - collapsedSizePx) / 2
 
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -90,7 +92,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.CENTER
-            x = screenWidth / 2 - 200
+            x = initialX
             y = -200
         }
 
@@ -107,6 +109,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                     val scope = rememberCoroutineScope()
                     
                     var isExpanded by remember { mutableStateOf(false) }
+                    var isFirstLaunch by remember { mutableStateOf(true) }
                     
                     var expandedWidthDp by remember { mutableStateOf(320.dp) }
                     var expandedHeightDp by remember { mutableStateOf(620.dp) }
@@ -127,6 +130,11 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                     var collapsedOffsetY by remember { mutableStateOf(0f) }
 
                     LaunchedEffect(isExpanded) {
+                        if (isFirstLaunch) {
+                            isFirstLaunch = false
+                            return@LaunchedEffect
+                        }
+
                         val newWidthPx = with(density) { expandedWidthDp.toPx() }
                         val newHeightPx = with(density) { expandedHeightDp.toPx() }
                         
@@ -163,29 +171,56 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                             collapsedOffsetX = 0f
                             collapsedOffsetY = 0f
                         } else {
-                            val targetCollapsedX = if (windowX < 0) -maxCollapsedX else maxCollapsedX
-                            val targetCollapsedY = windowY.coerceIn(-maxCollapsedY, maxCollapsedY)
-
-                            collapsedOffsetX = targetCollapsedX - windowX
-                            collapsedOffsetY = targetCollapsedY - windowY
+                            // 1. In-place collapse animation (zero jump, zero race conditions)
+                            collapsedOffsetX = 0f
+                            collapsedOffsetY = 0f
 
                             expansionProgress.animateTo(
                                 targetValue = 0f,
-                                animationSpec = tween(durationMillis = 230, easing = FastOutSlowInEasing)
+                                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
                             )
 
-                            windowX = targetCollapsedX
-                            windowY = targetCollapsedY
-                            params.x = windowX.roundToInt()
-                            params.y = windowY.roundToInt()
+                            // 2. Resize physical window to 64x64 at the exact current position
                             params.width = collapsedSizePx.roundToInt()
                             params.height = collapsedSizePx.roundToInt()
-                            collapsedOffsetX = 0f
-                            collapsedOffsetY = 0f
-                            
+                            params.x = windowX.roundToInt()
+                            params.y = windowY.roundToInt()
                             try {
                                 windowManager.updateViewLayout(composeView, params)
                             } catch (e: Exception) {}
+
+                            // 3. Smoothly slide the collapsed bubble to the nearest screen edge
+                            val targetEdgeX = if (windowX < 0) -maxCollapsedX else maxCollapsedX
+                            val targetEdgeY = windowY.coerceIn(-maxCollapsedY, maxCollapsedY)
+
+                            if (windowX != targetEdgeX || windowY != targetEdgeY) {
+                                val slideAnimX = Animatable(windowX)
+                                val slideAnimY = Animatable(windowY)
+                                
+                                launch {
+                                    slideAnimY.animateTo(
+                                        targetValue = targetEdgeY,
+                                        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                                    ) {
+                                        windowY = value
+                                        params.y = windowY.roundToInt()
+                                        try {
+                                            windowManager.updateViewLayout(composeView, params)
+                                        } catch (e: Exception) {}
+                                    }
+                                }
+                                
+                                slideAnimX.animateTo(
+                                    targetValue = targetEdgeX,
+                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                                ) {
+                                    windowX = value
+                                    params.x = windowX.roundToInt()
+                                    try {
+                                        windowManager.updateViewLayout(composeView, params)
+                                    } catch (e: Exception) {}
+                                }
+                            }
                         }
                     }
 
@@ -200,6 +235,31 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
                                 try {
                                     windowManager.updateViewLayout(composeView, params)
                                 } catch (e: Exception) {}
+                            },
+                            onDragEnd = {
+                                if (!isExpanded) {
+                                    val maxCollapsedX = (screenWidth - collapsedSizePx) / 2f
+                                    val maxCollapsedY = (screenHeight - collapsedSizePx) / 2f
+                                    val targetEdgeX = if (windowX < 0) -maxCollapsedX else maxCollapsedX
+                                    val targetEdgeY = windowY.coerceIn(-maxCollapsedY, maxCollapsedY)
+                                    
+                                    scope.launch {
+                                        val animX = Animatable(windowX)
+                                        val animY = Animatable(windowY)
+                                        launch {
+                                            animY.animateTo(targetEdgeY, tween(200, easing = FastOutSlowInEasing)) {
+                                                windowY = value
+                                                params.y = windowY.roundToInt()
+                                                try { windowManager.updateViewLayout(composeView, params) } catch (e: Exception) {}
+                                            }
+                                        }
+                                        animX.animateTo(targetEdgeX, tween(200, easing = FastOutSlowInEasing)) {
+                                            windowX = value
+                                            params.x = windowX.roundToInt()
+                                            try { windowManager.updateViewLayout(composeView, params) } catch (e: Exception) {}
+                                        }
+                                    }
+                                }
                             }
                         )
                     }
