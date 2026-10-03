@@ -21,6 +21,7 @@ import android.view.ViewConfiguration
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -356,6 +357,7 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
         isRunning.value = true
         // Moves the windows as the lock-screen service is switched on or off.
         PodAccessibilityService.onAvailabilityChanged = hostListener
+        warnIfLockScreenServiceStalled()
 
         // Start on the right edge, a quarter of the way down, and pop in.
         val area = area()
@@ -367,6 +369,32 @@ class FloatingPodService : Service(), LifecycleOwner, ViewModelStoreOwner, Saved
     }
 
     // ── Window host ──────────────────────────────────────────────────────
+
+    /**
+     * Says so when the lock-screen service is switched on but not actually
+     * running, which otherwise just looks like the PIP silently not showing
+     * on the lock screen. Typical after installing a new build: the system
+     * stops the service with the old app, and some phones leave its switch on
+     * without starting it again. Turning it off and on fixes it.
+     *
+     * Checked a moment after opening, since the service may still be
+     * connecting.
+     */
+    private fun warnIfLockScreenServiceStalled() {
+        scope.launch {
+            delay(LOCK_SERVICE_CHECK_DELAY_MS)
+            if (PodAccessibilityService.instance != null) return@launch
+            if (!PodAccessibilityService.isEnabledInSettings(this@FloatingPodService)) return@launch
+            Log.w(TAG, "Lock-screen accessibility service is enabled but not running")
+            Toast.makeText(
+                applicationContext,
+                "iPod on the lock screen is paused. Turn \"${getString(R.string.pod_accessibility_label)}\" " +
+                    "off and on again in Accessibility settings.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
 
     /**
      * Picks where the windows go: the accessibility service when it is on
@@ -1662,6 +1690,9 @@ private fun PodPanel(
  * wheel. Must exceed [MAX_POD_SCALE] for the wheel to win at every size.
  */
 private const val BODY_DRAG_SLOP_FACTOR = 2f
+
+/** How long after opening to check the lock-screen service has connected. */
+private const val LOCK_SERVICE_CHECK_DELAY_MS = 1500L
 
 /**
  * The stand-in drawn while the iPod is resized from its bottom-left corner:

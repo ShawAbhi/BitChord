@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- The service's name in Accessibility settings. The dev build overrides it
+         (src/dev), so the two builds can't be mistaken for each other there. -->
+    <string name="pod_accessibility_label">BitChord iPod</string>
     <string name="pod_accessibility_summary">Shows the iPod PIP over the lock screen</string>
     <string name="pod_accessibility_description">Lets the BitChord iPod bubble and window float over your lock screen, so you can control music without unlocking. It doesn\'t read your screen, your input or anything you type. It only lets the iPod window appear above the lock screen. Turn it off and the iPod still floats over your apps, just not over the lock screen.</string>
 </resources>

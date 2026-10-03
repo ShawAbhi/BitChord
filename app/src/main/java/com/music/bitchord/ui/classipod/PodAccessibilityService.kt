@@ -1,6 +1,7 @@
 package com.music.bitchord.ui.classipod
 
 import android.accessibilityservice.AccessibilityService
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
@@ -31,6 +32,21 @@ class PodAccessibilityService : AccessibilityService() {
 
         /** Told whenever [instance] changes, on the main thread. */
         internal var onAvailabilityChanged: (() -> Unit)? = null
+
+        /**
+         * Whether the service is switched on in Accessibility settings — which
+         * is not the same as running: after the app is reinstalled or killed,
+         * some phones (Xiaomi/HyperOS especially) leave the switch on while
+         * the service is no longer bound, and [instance] stays null.
+         */
+        fun isEnabledInSettings(context: Context): Boolean {
+            val ours = ComponentName(context, PodAccessibilityService::class.java)
+            val enabled = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+            ) ?: return false
+            return enabled.split(':').any { ComponentName.unflattenFromString(it) == ours }
+        }
 
         /** Opens the system Accessibility settings, where the service is switched on. */
         fun openSettings(context: Context) {

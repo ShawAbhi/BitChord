@@ -172,7 +172,9 @@ fun FloatingBottomBar(
         selectedIndex * tabStepPx + dragOffset
     } else 0f
 
-    val animatedPillOffset by animateFloatAsState(
+    // Performance: a State read only in the graphicsLayer below — reading it
+    // in composition recomposed the whole bar, glass included, every frame.
+    val animatedPillOffset = animateFloatAsState(
         targetValue = pillTargetPx,
         animationSpec = glassSpec,
         label = "pillOffset",
@@ -183,8 +185,8 @@ fun FloatingBottomBar(
     // it. The stretch below is a function of this and nothing else, which is
     // what keeps it honest — the shape can only be deformed while it is
     // actually behind where it is going.
-    val lag = if (tabStepPx > 0f) {
-        (abs(pillTargetPx - animatedPillOffset) / tabStepPx).coerceIn(0f, 1f)
+    fun lagAt(offset: Float) = if (tabStepPx > 0f) {
+        (abs(pillTargetPx - offset) / tabStepPx).coerceIn(0f, 1f)
     } else {
         0f
     }
@@ -221,7 +223,9 @@ fun FloatingBottomBar(
                     .width(with(density) { tabWidthPx.toDp() })
                     .height(with(density) { rowSize.height.toDp() })
                     .graphicsLayer {
-                        translationX = animatedPillOffset
+                        val offset = animatedPillOffset.value
+                        val lag = lagAt(offset)
+                        translationX = offset
                         // Around its own centre, so the indicator draws out
                         // both ways rather than growing a tail off one edge —
                         // a leading edge that ran ahead of the glyph it is

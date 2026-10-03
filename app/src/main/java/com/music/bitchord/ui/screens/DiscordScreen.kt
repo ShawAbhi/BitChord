@@ -157,7 +157,11 @@ private fun DiscordActivityKind.localizedVerb(): String =
 @Composable
 fun DiscordScreen(
     song: Song?,
-    positionMs: Long,
+    /**
+     * The playhead, read lazily. Performance: a lambda so only [ProgressLine]
+     * re-runs as it ticks, not this whole page and the page host above it.
+     */
+    positionMs: () -> Long,
     durationMs: Long,
     onOpenLogin: () -> Unit,
     onOpenDialog: (DiscordDialog) -> Unit,
@@ -570,7 +574,7 @@ private fun NoticeCard(text: String, onDismiss: () -> Unit) {
 @Composable
 private fun RichPresencePreview(
     song: Song?,
-    positionMs: Long,
+    positionMs: () -> Long,
     durationMs: Long,
     heading: String,
     verb: String,
@@ -710,9 +714,10 @@ private fun PresenceButton(label: String, enabled: Boolean, onClick: () -> Unit)
  * into a picture of somewhere else.
  */
 @Composable
-private fun ProgressLine(positionMs: Long, durationMs: Long) {
+private fun ProgressLine(positionMs: () -> Long, durationMs: Long) {
+    val position = positionMs()
     val fraction = if (durationMs > 0) {
-        (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+        (position.toFloat() / durationMs).coerceIn(0f, 1f)
     } else {
         0f
     }
@@ -737,7 +742,7 @@ private fun ProgressLine(positionMs: Long, durationMs: Long) {
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = formatClock(positionMs),
+                text = formatClock(position),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -51,6 +51,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
@@ -168,6 +170,12 @@ fun FrostedTopBar(
     // A lambda, not a value: the drag changes every frame, and reading it in
     // the caller would recompose the whole app on each one.
     pullFraction: () -> Float = { 0f },
+    /**
+     * True while a [GlassTopPanel] sits behind the whole top section: the mark,
+     * back button and actions then drop their own glass circles and sit
+     * directly on that one surface.
+     */
+    unifiedGlass: Boolean = false,
     actions: @Composable () -> Unit = {},
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
@@ -281,6 +289,7 @@ fun FrostedTopBar(
                     ArtworkPageBackButton(
                         onClick = onBack,
                         hazeState = backButtonHazeState,
+                        bare = unifiedGlass,
                         // The surface edge aligns with the floating navbar. The
                         // padding belongs outside the circle; its icon remains
                         // centred in the same 44dp control in every material.
@@ -303,6 +312,7 @@ fun FrostedTopBar(
             } else if (useFloatingChrome) {
                 FloatingAppMark(
                     hazeState = backButtonHazeState,
+                    bare = unifiedGlass,
                     modifier = Modifier
                         .align(Alignment.CenterStart)
                         .padding(start = PAGE_GUTTER),
@@ -337,6 +347,7 @@ fun FrostedTopBar(
             if (useFloatingChrome) {
                 ArtworkPageActions(
                     hazeState = backButtonHazeState,
+                    bare = unifiedGlass,
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
                         // Same outer edge as the navbar; PILL_INSET below is
@@ -366,6 +377,8 @@ fun FrostedTopBar(
 private fun FloatingAppMark(
     hazeState: HazeState?,
     modifier: Modifier = Modifier,
+    /** On a [GlassTopPanel]: no surface of its own. */
+    bare: Boolean = false,
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val useLiquidGlass = LocalLiquidGlassEnabled.current && isGlassSupported()
@@ -382,7 +395,7 @@ private fun FloatingAppMark(
         Box(
             modifier = Modifier
                 .size(44.dp)
-                .then(artworkPageSurface(shape = CircleShape, hazeState = hazeState)),
+                .then(if (bare) Modifier else artworkPageSurface(shape = CircleShape, hazeState = hazeState)),
             contentAlignment = Alignment.Center,
         ) {
             Image(
@@ -410,6 +423,8 @@ private fun ArtworkPageBackButton(
     onClick: () -> Unit,
     hazeState: HazeState?,
     modifier: Modifier = Modifier,
+    /** On a [GlassTopPanel]: no surface of its own. */
+    bare: Boolean = false,
 ) {
     val shape = CircleShape
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
@@ -424,7 +439,7 @@ private fun ArtworkPageBackButton(
         onClick = onClick,
         modifier = modifier
             .size(44.dp)
-            .then(artworkPageSurface(shape = shape, hazeState = hazeState)),
+            .then(if (bare) Modifier else artworkPageSurface(shape = shape, hazeState = hazeState)),
     ) {
         Icon(
             Icons.AutoMirrored.Rounded.ArrowBack,
@@ -439,11 +454,13 @@ private fun ArtworkPageBackButton(
 private fun ArtworkPageActions(
     hazeState: HazeState?,
     modifier: Modifier = Modifier,
+    /** On a [GlassTopPanel]: no surface of its own. */
+    bare: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     Row(
         modifier = modifier
-            .then(artworkPageSurface(shape = CircleShape, hazeState = hazeState))
+            .then(if (bare) Modifier else artworkPageSurface(shape = CircleShape, hazeState = hazeState))
             // Keep the right edge fixed while a new action opens room to its
             // left. The surface itself therefore grows instead of jumping to
             // its new width in a single frame.
@@ -484,6 +501,43 @@ private fun Modifier.artworkActionEdgePadding(): Modifier = layout { measurable,
         placeable.placeRelative(edgePadding, 0)
     }
 }
+
+/**
+ * One liquid glass surface behind the whole top section — status bar, the bar's
+ * controls and, on Home, the source tabs — in place of a glass circle per
+ * control. It is [height] tall from the top of the window.
+ *
+ * The glass lens bends the picture near every edge of its shape, and here only
+ * the bottom edge should do that. So the surface is drawn [PANEL_OVERHANG]
+ * past the top and both sides of the window, where those edges — and its
+ * rounded corners — are off screen, and only the straight bottom edge, with
+ * its refraction and rim highlight, is ever seen.
+ *
+ * [extraPx] is added below [height] — Home's source tabs, shrinking as they
+ * collapse. A lambda read during layout, so following them every frame of a
+ * scroll re-lays-out this surface without recomposing anything.
+ */
+@Composable
+fun GlassTopPanel(height: Dp, modifier: Modifier = Modifier, extraPx: () -> Float = { 0f }) {
+    val shape = remember { RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp) }
+    Box(
+        modifier
+            .fillMaxWidth()
+            .layout { measurable, constraints ->
+                val overhang = PANEL_OVERHANG.roundToPx()
+                val width = constraints.maxWidth
+                val panelHeight = (height.toPx() + extraPx().coerceAtLeast(0f)).roundToInt()
+                val placeable = measurable.measure(
+                    Constraints.fixed(width + overhang * 2, panelHeight + overhang),
+                )
+                layout(width, panelHeight) { placeable.place(-overhang, -overhang) }
+            }
+            .liquidGlass(shape),
+    )
+}
+
+/** How far [GlassTopPanel] runs past the window's top and sides: beyond the lens. */
+private val PANEL_OVERHANG = 40.dp
 
 /** The navbar's exact material choice, reusable by every floating top control. */
 @OptIn(ExperimentalHazeMaterialsApi::class)

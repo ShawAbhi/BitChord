@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,7 +33,6 @@ import com.music.bitchord.ui.components.backdrop.effects.lens
 import com.music.bitchord.ui.components.backdrop.highlight.Highlight
 import com.music.bitchord.ui.components.backdrop.highlight.HighlightElement
 import com.music.bitchord.ui.components.backdrop.internal.ShapeProvider
-import com.music.bitchord.ui.components.backdrop.shadow.Shadow
 import androidx.compose.ui.unit.dp
 
 /** Whether the liquid glass nav bar is turned on — see [AppSettings.liquidGlass]. */
@@ -120,7 +120,9 @@ fun Modifier.lightweightLiquidGlass(
     } else {
         Color(0xFF121212)
     }
-    val shapeProvider = ShapeProvider { shape }
+    // Remembered for the same reason as in [liquidGlass]: a new ShapeProvider
+    // each call made the highlight element differ on every recomposition.
+    val shapeProvider = remember(shape) { ShapeProvider { shape } }
 
     return clip(shape)
         .background(
@@ -175,7 +177,14 @@ fun Modifier.liquidGlass(shape: CornerBasedShape): Modifier {
         Color(0xFF121212)
     }
 
-    return drawBackdrop(
+    // Performance: built once per set of inputs and reused. drawBackdrop makes a
+    // fresh ShapeProvider and fresh lambdas on every call, and its elements
+    // compare those by identity — so every recomposition of a glass surface
+    // used to count as "changed" and tore down and rebuilt its RenderEffect
+    // chain (colour matrix, blur, lens), shadow and highlight. Remembered, a
+    // recomposition hands back the same elements and the node is left alone.
+    val glass = remember(backdrop, shape, blurPx, lensHeightPx, lensAmountPx, surfaceTintColor) {
+        Modifier.drawBackdrop(
         backdrop = backdrop,
         shape = { shape },
         effects = {
@@ -191,10 +200,16 @@ fun Modifier.liquidGlass(shape: CornerBasedShape): Modifier {
             }
         },
         highlight = { Highlight.Default },
-        shadow = { Shadow.Default },
+        // No backdrop shadow. Every caller clips to its shape before this
+        // modifier and draws its own Compose shadow outside the clip, so this
+        // one — a blurred offscreen layer under the surface — was always
+        // clipped away unseen, at the cost of rendering it.
+        shadow = null,
         onDrawSurface = {
             drawRect(color = surfaceTintColor.copy(alpha = SURFACE_OPACITY), size = size)
         },
         backdropScale = GLASS_RESOLUTION_SCALE,
-    )
+        )
+    }
+    return this.then(glass)
 }

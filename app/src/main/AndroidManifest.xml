@@ -349,7 +349,7 @@
              native lock screen. Reads nothing; see PodAccessibilityService. -->
         <service
             android:name=".ui.classipod.PodAccessibilityService"
-            android:label="BitChord iPod"
+            android:label="@string/pod_accessibility_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>

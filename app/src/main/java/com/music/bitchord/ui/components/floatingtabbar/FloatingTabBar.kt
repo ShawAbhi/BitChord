@@ -768,16 +768,14 @@ private fun SharedTransitionScope.ExpandedTabs(
     } else {
         0f
     }
-    val animatedIndicatorOffset by animateFloatAsState(
+    // Performance: held as a State and read only inside graphicsLayer below.
+    // Reading it here (it used to feed `lag` in composition) recomposed the
+    // whole tab bar — glass surfaces included — on every frame of a switch.
+    val animatedIndicatorOffset = animateFloatAsState(
         targetValue = indicatorTargetPx,
         animationSpec = selectionSpec,
         label = "glassPillOffset"
     )
-    val lag = if (tabStepPx > 0f) {
-        (abs(indicatorTargetPx - animatedIndicatorOffset) / tabStepPx).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
 
     LaunchedEffect(selectedTabKey) {
         dragOffset = 0f
@@ -810,7 +808,13 @@ private fun SharedTransitionScope.ExpandedTabs(
                     .width(with(density) { tabWidthPx.toDp() })
                     .height(with(density) { rowSize.height.toDp() })
                     .graphicsLayer {
-                        translationX = animatedIndicatorOffset
+                        val offset = animatedIndicatorOffset.value
+                        val lag = if (tabStepPx > 0f) {
+                            (abs(indicatorTargetPx - offset) / tabStepPx).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        }
+                        translationX = offset
                         scaleX = 1f + lag * STRETCH
                         scaleY = 1f - lag * STRETCH * SQUASH
                     }

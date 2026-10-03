@@ -25,6 +25,9 @@ import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.node.requireGraphicsContext
 import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.IntSize
 import com.music.bitchord.ui.components.backdrop.internal.ShapeProvider
 import com.music.bitchord.ui.components.backdrop.internal.blur
@@ -79,6 +82,21 @@ internal class ShadowNode(
 
     private val paint = Paint()
 
+    /**
+     * What [shadowLayer] was last recorded for. Vendored addition, as in
+     * HighlightNode: recorded once per change instead of on every draw.
+     */
+    private var recordedFor: RecordKey? = null
+
+    private data class RecordKey(
+        val size: Size,
+        val layoutDirection: LayoutDirection,
+        val density: Float,
+        val fontScale: Float,
+        val shadow: Shadow,
+        val shape: Shape,
+    )
+
     override fun ContentDrawScope.draw() {
         val shadow = shadow() ?: return drawContent()
 
@@ -97,10 +115,19 @@ internal class ShadowNode(
             )
             val outline = shapeProvider.shape.createOutline(size, layoutDirection, density)
 
-            configurePaint(shadow)
-
             shadowLayer.alpha = shadow.alpha
             shadowLayer.blendMode = shadow.blendMode
+            val key = RecordKey(
+                size = size,
+                layoutDirection = layoutDirection,
+                density = density.density,
+                fontScale = density.fontScale,
+                shadow = shadow,
+                shape = shapeProvider.innerShape,
+            )
+            if (key != recordedFor) {
+            recordedFor = key
+            configurePaint(shadow)
             shadowLayer.record(shadowSize) {
                 translate(radius * 2f + offsetX, radius * 2f + offsetY) {
                     val canvas = drawContext.canvas
@@ -109,6 +136,7 @@ internal class ShadowNode(
                     canvas.drawOutline(outline, ShadowMaskPaint)
                     canvas.translate(offsetX, offsetY)
                 }
+            }
             }
 
             translate(-radius * 2f, -radius * 2f) {
@@ -133,6 +161,7 @@ internal class ShadowNode(
             graphicsContext.releaseGraphicsLayer(layer)
             shadowLayer = null
         }
+        recordedFor = null
     }
 
     private fun DrawScope.configurePaint(shadow: Shadow) {

@@ -11,6 +11,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
+import kotlin.math.roundToInt
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -110,6 +113,12 @@ fun TopFadeBlur(
      */
     scrimColor: Color,
     hasTabs: Boolean = false,
+    /**
+     * How far Home's source tabs have collapsed, in px: 0 shown, negative as
+     * they slide up. The [hasTabs] band shortens by as much. A lambda read in
+     * layout, so following a scroll never recomposes this.
+     */
+    tabsOffsetPx: () -> Float = { 0f },
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
 
@@ -120,7 +129,7 @@ fun TopFadeBlur(
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .height(solidHeight)
+                .then(if (hasTabs) Modifier.collapsingTabsHeight(solidHeight, 72.dp, tabsOffsetPx) else Modifier.height(solidHeight))
                 .background(MaterialTheme.colorScheme.surface)
         )
         return
@@ -132,7 +141,7 @@ fun TopFadeBlur(
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .height(height)
+                .collapsingTabsHeight(height, 72.dp, tabsOffsetPx)
                 .optimizedHazeEffect(
                     state = hazeState,
                     style = HazeMaterials.regular(pageColor),
@@ -242,3 +251,16 @@ fun TopBarBlur(
             ),
     )
 }
+
+/**
+ * [full] tall, less however far the tabs have collapsed — never by more than
+ * the [tabsBand] they account for. Measured from the lambda in the layout
+ * phase, so it follows a scroll without recomposition.
+ */
+private fun Modifier.collapsingTabsHeight(full: Dp, tabsBand: Dp, offsetPx: () -> Float): Modifier =
+    layout { measurable, constraints ->
+        val shrink = (-offsetPx()).coerceIn(0f, tabsBand.toPx())
+        val h = (full.toPx() - shrink).roundToInt().coerceAtLeast(0)
+        val placeable = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
+        layout(placeable.width, h) { placeable.place(0, 0) }
+    }

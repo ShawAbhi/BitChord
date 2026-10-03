@@ -31,13 +31,11 @@ import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.ui.components.GLASS_EDGE_COLOR
 import com.music.bitchord.ui.components.GLASS_EDGE_WIDTH
 import com.music.bitchord.ui.components.glassContentColor
-import com.music.bitchord.ui.components.liquidGlass
-import com.music.bitchord.ui.components.optimizedHazeEffect
+import com.music.bitchord.ui.components.lightweightLiquidGlass
 import com.music.bitchord.ui.haptics.Haptic
 import com.music.bitchord.ui.haptics.rememberHaptics
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
-import dev.chrisbanes.haze.materials.HazeMaterials
 
 /**
  * The round iPod button beside the mini player / glass nav bar that opens the
@@ -78,23 +76,32 @@ fun RowScope.PodLauncherButton(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val surfaceColor = MaterialTheme.colorScheme.surface
+            // Performance: no live blur of its own. This button sits beside the
+            // bar for as long as the app is open, and as a full liquidGlass
+            // surface it added another backdrop capture, blur, lens and shadow
+            // pass every frame anything moved (as a Haze surface, another blur
+            // pass) — for a 56dp circle. The lightweight glass keeps the tint,
+            // highlight and hairline that make it read as glass beside the
+            // nav bar; elsewhere it is a near-opaque surface.
             val material = when {
-                // liquidGlass draws its own solid fill under reduced blur, but
-                // with its own hairline too; handled below with the others so
-                // there is exactly one edge either way.
-                reduceDynamicBlur -> Modifier.background(surfaceColor, CircleShape)
-                glass -> Modifier.liquidGlass(CircleShape)
-                else -> Modifier.optimizedHazeEffect(
-                    state = hazeState,
-                    style = HazeMaterials.regular(surfaceColor),
-                )
+                reduceDynamicBlur -> Modifier
+                    .background(surfaceColor, CircleShape)
+                    .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, CircleShape)
+                // Under the lightweight glass's own 40% tint, a further fill:
+                // with no blur behind it, raw content showing through at 60%
+                // would make the glyph hard to read.
+                glass -> Modifier
+                    .background(surfaceColor.copy(alpha = 0.6f), CircleShape)
+                    .lightweightLiquidGlass(CircleShape, fallbackColor = surfaceColor)
+                else -> Modifier
+                    .background(surfaceColor.copy(alpha = 0.94f), CircleShape)
+                    .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, CircleShape)
             }
             Box(
                 modifier = Modifier
                     .size(LAUNCHER_SIZE)
                     .clip(CircleShape)
                     .then(material)
-                    .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, CircleShape)
                     .clickable {
                         haptics.play(Haptic.Select)
                         FloatingPodService.start(context)
