@@ -427,6 +427,13 @@ object AppSettings {
     /** Swiping a song row plays it next instead of adding it to the end of the queue. */
     val swipeToPlayNext = MutableStateFlow(false)
 
+    /**
+     * While the iPod PIP is open, locking the phone shows the iPod full screen
+     * over the lock screen until it is unlocked. Off: the system lock screen,
+     * untouched. See ui/classipod/LockPodActivity.
+     */
+    val podLockScreen = MutableStateFlow(true)
+
     /** Once a song has been suggested or played this session, AutoPlay won't offer it again. */
     val dontRepeatSuggestions = MutableStateFlow(false)
 
@@ -862,6 +869,7 @@ object AppSettings {
         hideVolumeBar.value = prefs.getBoolean(KEY_HIDE_VOLUME_BAR, false)
         hideSongStatus.value = prefs.getBoolean(KEY_HIDE_SONG_STATUS, false)
         swipeToPlayNext.value = prefs.getBoolean(KEY_SWIPE_TO_PLAY_NEXT, false)
+        podLockScreen.value = prefs.getBoolean(KEY_POD_LOCK_SCREEN, true)
         dontRepeatSuggestions.value = prefs.getBoolean(KEY_DONT_REPEAT_SUGGESTIONS, false)
         preferMusicOnly.value = prefs.getBoolean(KEY_PREFER_MUSIC_ONLY, false)
         smartVersionAlignment.value = prefs.getBoolean(KEY_SMART_VERSION_ALIGNMENT, true)
@@ -1236,6 +1244,11 @@ object AppSettings {
     fun setSwipeToPlayNext(value: Boolean) {
         swipeToPlayNext.value = value
         prefs.edit().putBoolean(KEY_SWIPE_TO_PLAY_NEXT, value).apply()
+    }
+
+    fun setPodLockScreen(value: Boolean) {
+        podLockScreen.value = value
+        prefs.edit().putBoolean(KEY_POD_LOCK_SCREEN, value).apply()
     }
 
     fun setDontRepeatSuggestions(value: Boolean) {
@@ -1965,6 +1978,7 @@ object AppSettings {
     private const val KEY_HIDE_VOLUME_BAR = "hide_volume_bar"
     private const val KEY_HIDE_SONG_STATUS = "hide_song_status"
     private const val KEY_SWIPE_TO_PLAY_NEXT = "swipe_to_play_next"
+    private const val KEY_POD_LOCK_SCREEN = "pod_lock_screen"
     private const val KEY_DONT_REPEAT_SUGGESTIONS = "dont_repeat_suggestions"
     private const val KEY_PREFER_MUSIC_ONLY = "prefer_music_only"
     private const val KEY_SMART_VERSION_ALIGNMENT = "smart_version_alignment"

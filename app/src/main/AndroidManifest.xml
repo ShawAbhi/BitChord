@@ -345,20 +345,19 @@
             android:exported="false">
         </activity>
 
-        <!-- Lends the Classipod PIP an accessibility overlay so it floats over the
-             native lock screen. Reads nothing; see PodAccessibilityService. -->
-        <service
-            android:name=".ui.classipod.PodAccessibilityService"
-            android:label="@string/pod_accessibility_label"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/pod_accessibility_service" />
-        </service>
+        <!-- The iPod as the lock screen, while the PIP is open: shown when locked,
+             in a task of its own so unlocking returns to whatever was open.
+             See ui/classipod/LockPodActivity. -->
+        <activity
+            android:name=".ui.classipod.LockPodActivity"
+            android:label="BitChord iPod"
+            android:theme="@android:style/Theme.Material.NoActionBar"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.music.bitchord.lockpod"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:exported="false"
+            tools:targetApi="o_mr1" />
 
         <service
             android:name=".ui.classipod.FloatingPodService"
