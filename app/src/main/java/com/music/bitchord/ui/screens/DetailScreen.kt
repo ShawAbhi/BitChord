@@ -57,6 +57,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -993,12 +994,19 @@ private fun PageBackground(
 
             // Above the still art but below both gradients, so the scrim and
             // the wash that blend the header into the page still sit over it.
-            // Always running: unlike the player's sleeve there is no transport
-            // here to follow, and the page is only up while it's being read.
+            // Running while the header is on screen: there is no transport
+            // here to follow. Performance: paused once it has scrolled away —
+            // it sits inside the page's blur source and the app backdrop, so
+            // every video frame re-recorded the page and re-ran every Haze and
+            // glass blur, long after the clip itself was out of sight.
             canvas?.let { clip ->
+                val artPx = with(LocalDensity.current) { artHeight.toPx() }
+                val headerOnScreen by remember(listState, artPx) {
+                    derivedStateOf { listState.headerTop(artPx) > -artPx }
+                }
                 CanvasArtworkPlayer(
                     canvas = clip,
-                    isPlaying = true,
+                    isPlaying = headerOnScreen,
                     modifier = Modifier.matchParentSize(),
                 )
             }

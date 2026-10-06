@@ -174,6 +174,25 @@ fun SearchScreen(
             }
         }
 
+        // Performance: derived once per result set, not inside the list's
+        // builder, which re-runs on every recomposition of this screen.
+        val resultRows = (results as? UiState.Success)?.data
+        val resultTracks = remember(resultRows) {
+            resultRows?.mapNotNull { row ->
+                when (row) {
+                    is SearchResult.TopTrack -> row.song
+                    is SearchResult.Track -> row.song
+                    else -> null
+                }
+            }.orEmpty()
+        }
+        val resultTop = remember(resultRows) {
+            resultRows?.filterIsInstance<SearchResult.TopTrack>()?.firstOrNull()
+        }
+        val resultSections = remember(resultRows, filter) {
+            resultRows?.let { searchSections(it, filter) }.orEmpty()
+        }
+
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -210,14 +229,8 @@ fun SearchScreen(
                 results is UiState.Loading -> songListSkeleton(circular = filter == SearchFilter.ARTISTS)
                 results is UiState.Error -> item { MessageState(results.message) }
                 results is UiState.Success -> {
-                    val tracks = results.data
-                        .mapNotNull { row -> when (row) {
-                            is SearchResult.TopTrack -> row.song
-                            is SearchResult.Track -> row.song
-                            is SearchResult.Browse -> null
-                            else -> null
-                        } }
-                    val topResult = results.data.filterIsInstance<SearchResult.TopTrack>().firstOrNull()
+                    val tracks = resultTracks
+                    val topResult = resultTop
                     if (filter == SearchFilter.ALL && topResult != null) {
                         item(key = "search:top-result:${topResult.song.videoId}") {
                             TopResultCard(
@@ -228,7 +241,7 @@ fun SearchScreen(
                             )
                         }
                     }
-                    searchSections(results.data, filter).forEach { section ->
+                    resultSections.forEach { section ->
                         section.title?.let { title ->
                             item(key = "search-section:$title") {
                                 Text(

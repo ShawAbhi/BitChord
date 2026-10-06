@@ -693,42 +693,6 @@ fun ConfirmationAlert(
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
-            PillTextField(
-                value = nameValue,
-                onValueChange = onNameChange,
-                placeholder = "Custom Tab Name (Optional)",
-                enabled = !testing,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-            )
-            Spacer(Modifier.height(8.dp))
-            PillTextField(
-                value = urlValue,
-                onValueChange = onUrlChange,
-                placeholder = urlPlaceholder,
-                enabled = !testing,
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Uri,
-                    imeAction = ImeAction.Next,
-                ),
-            )
-            Spacer(Modifier.height(8.dp))
-            PillTextField(
-                value = usernameValue,
-                onValueChange = onUsernameChange,
-                placeholder = stringResource(R.string.username) + " (Optional)",
-                enabled = !testing,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-            )
-            Spacer(Modifier.height(8.dp))
-            PillTextField(
-                value = passwordValue,
-                onValueChange = onPasswordChange,
-                placeholder = stringResource(R.string.password) + " (Optional)",
-                enabled = !testing,
-                isPassword = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { if (canSubmit && !testing) onSave() }),
-            )
         }
         AlertRule()
         AlertAction(label = confirmLabel, emphasised = true, onClick = onConfirm)

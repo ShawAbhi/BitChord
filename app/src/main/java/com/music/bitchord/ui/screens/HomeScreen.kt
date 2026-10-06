@@ -236,7 +236,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
     onRecentsViewTypeToggle: () -> Unit,
 ) {
     shelves.forEachIndexed { index, shelf ->
-        item(key = shelf.title + index) {
+        // Performance: a content type per layout, so a scrolled-away shelf is
+        // only ever recycled into another of the same kind — not a hero card
+        // rebuilt as a row of squares.
+        val kind = when {
+            index == 0 && shelf.title.equals(RECENTS_TITLE, ignoreCase = true) -> "recents"
+            index == 0 && firstIsHero -> "hero"
+            else -> "shelf"
+        }
+        item(key = shelf.title + index, contentType = kind) {
             val openItem: (ShelfItem) -> Unit = { item -> onItemClick(item, shelf.title) }
             if (index == 0 && shelf.title.equals(RECENTS_TITLE, ignoreCase = true)) {
                 RecentShelf(
@@ -274,11 +282,14 @@ private fun RecentShelf(
         if (viewType == LibraryViewType.LIST) {
             BoxWithConstraints {
                 val columnWidth = trackColumnWidth(maxWidth)
+                // Remembered: chunked() allocates a fresh list of lists on
+                // every recomposition otherwise.
+                val columns = remember(shelf.items) { shelf.items.chunked(RECENT_TRACKS_PER_COLUMN) }
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(shelf.items.chunked(RECENT_TRACKS_PER_COLUMN)) { column ->
+                    items(columns) { column ->
                         Column(Modifier.width(columnWidth)) {
                             column.forEach { item ->
                                 RecentTrackRow(
@@ -835,7 +846,11 @@ private fun ServiceCard(colors: List<Color>, trackKey: String, icon: ImageVector
         MeshGradientBackground(
             palette = palette,
             trackKey = trackKey,
-            continuous = true,
+            // Performance: drift once and settle. An endless orbit re-blurred
+            // this card every frame, and with it re-recorded the page the
+            // glass and Haze surfaces sample — so the whole UI re-blurred at
+            // refresh rate while the page sat idle.
+            continuous = false,
             blurRadius = 24.dp,
         )
         Icon(
@@ -873,7 +888,11 @@ internal fun ShelfCard(
                     MeshGradientBackground(
                         palette = palette,
                         trackKey = "local:downloads",
-                        continuous = true,
+                        // Performance: drift once and settle. An endless orbit re-blurred
+                        // this card every frame, and with it re-recorded the page the
+                        // glass and Haze surfaces sample — so the whole UI re-blurred at
+                        // refresh rate while the page sat idle.
+                        continuous = false,
                         blurRadius = 24.dp,
                     )
                     Icon(

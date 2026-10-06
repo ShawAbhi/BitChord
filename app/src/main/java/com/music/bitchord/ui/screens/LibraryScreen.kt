@@ -340,7 +340,11 @@ private fun ReplayBanner(card: ReplayHeroCard?, onClick: () -> Unit) {
             MeshGradientBackground(
                 palette = palette,
                 trackKey = card?.artworkUrl ?: "replay",
-                continuous = true,
+                // Performance: drift once and settle. An endless orbit re-blurred
+                // this card every frame, and with it re-recorded the page the
+                // glass and Haze surfaces sample — so the whole UI re-blurred at
+                // refresh rate while the page sat idle.
+                continuous = false,
                 // A short wide strip: at the backdrop's own radius the four
                 // colours blur into one wash before they reach its ends.
                 blurRadius = 28.dp,

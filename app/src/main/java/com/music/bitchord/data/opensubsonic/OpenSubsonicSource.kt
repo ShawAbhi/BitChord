@@ -28,7 +28,7 @@ class OpenSubsonicSource(
         return if (ok) SourceHealth.Ok() else SourceHealth.Unreachable("Failed to connect to OpenSubsonic server")
     }
 
-    override suspend fun search(query: String, limit: Int, waitForAll: Boolean): List<Song> {
+    override suspend fun search(query: String, limit: Int, waitForAll: Boolean, request: StreamRequest?): List<Song> {
         TrackLog.d(TAG, "▶ OpenSubsonic search() query=\"$query\" limit=$limit")
         val results = runCatching { OpenSubsonicService.search(config.baseUrl, config.username, config.password, query, limit) }.getOrDefault(emptyList())
         TrackLog.d(TAG, "  ✓ OpenSubsonic returned ${results.size} tracks")

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pod_lock_screen">iPod lock screen</string>
+    <string name="pod_lock_screen_on">While the iPod is open, locking the phone shows it full screen</string>
+    <string name="pod_lock_screen_off">The system lock screen is used</string>
+</resources>

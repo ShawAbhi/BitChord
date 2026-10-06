@@ -26,6 +26,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,6 +50,14 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.animation.core.animate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyListState
@@ -83,6 +92,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.material3.SheetValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -101,6 +113,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -219,6 +232,8 @@ import com.music.bitchord.ui.components.QueueActionNotice
 import com.music.bitchord.ui.components.QueueActionNoticeHost
 import com.music.bitchord.ui.components.TopBarAccountButton
 import com.music.bitchord.ui.components.TopBarBlur
+import com.music.bitchord.ui.components.TopFadeBlur
+import com.music.bitchord.ui.classipod.PodLauncherButton
 import com.music.bitchord.ui.components.TopBarDownloadButton
 import com.music.bitchord.ui.components.optimizedHazeEffect
 import com.music.bitchord.ui.components.topBarContentPadding
@@ -315,10 +330,16 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 val appBackdrop = rememberLayerBackdrop(onDraw = paintBackdrop)
+                // Collected once for every song row in the app. See
+                // [LocalSavedDownloads].
+                val savedDownloads = com.music.bitchord.download.Downloads.saved.collectAsStateWithLifecycle()
+                val swipeToPlayNext = com.music.bitchord.data.settings.AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
                 CompositionLocalProvider(
                     LocalOverscrollFactory provides iosOverscrollFactory,
                     LocalLiquidGlassEnabled provides liquidGlassEnabled,
                     LocalAppBackdrop provides appBackdrop,
+                    com.music.bitchord.ui.components.LocalSavedDownloads provides savedDownloads,
+                    com.music.bitchord.ui.components.LocalSwipeToPlayNext provides swipeToPlayNext,
                 ) {
                 // The window's width, measured rather than asked for.
                 //
@@ -424,6 +445,44 @@ private fun BitChordApp(
      * permanent pane.
      */
     var showNowPlaying by remember { mutableStateOf(false) }
+    // True while the Now Playing sheet fully covers the page. Performance: the
+    // sheet is a window of its own, and the page under it kept recording itself
+    // into the glass backdrop and the Haze source for surfaces nobody can see.
+    var playerCoversPage by remember { mutableStateOf(false) }
+
+    // Home's source tabs collapse under the top bar while the feed scrolls
+    // down and come straight back on any scroll up, settling fully in or out
+    // when the gesture ends. [homeTabsOffset] runs from 0 (shown) to minus the
+    // tabs' height (hidden); it is only read in layout and draw lambdas, so
+    // moving it re-lays-out the tabs and their background, never recomposes.
+    val homeTabsOffset = remember { mutableFloatStateOf(0f) }
+    // The tabs' own height, measured; zero whenever they aren't up, which
+    // turns the collapse off on every other page.
+    val homeTabsTravel = remember { mutableFloatStateOf(0f) }
+    val homeTabsScroll = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val travel = homeTabsTravel.floatValue
+                if (travel > 0f) {
+                    homeTabsOffset.floatValue =
+                        (homeTabsOffset.floatValue + available.y).coerceIn(-travel, 0f)
+                }
+                // Consumes nothing: the feed scrolls exactly as before, the
+                // tabs just ride along with it.
+                return Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                val travel = homeTabsTravel.floatValue
+                val now = homeTabsOffset.floatValue
+                if (travel > 0f && now < 0f && now > -travel) {
+                    val target = if (now > -travel / 2f) 0f else -travel
+                    animate(now, target) { value, _ -> homeTabsOffset.floatValue = value }
+                }
+                return Velocity.Zero
+            }
+        }
+    }
     // The far end of the relay from a widget's artwork. Cleared here rather than
     // where it was set, so the request is spent by being served — see
     // [PlayerDeepLink.handled]. The sheet itself is gated on there being a track,
@@ -739,14 +798,35 @@ private fun BitChordApp(
         }
     }
     val controller = rememberMediaController()
-    val player = rememberPlayerState(controller)
+    // Field by field rather than one snapshot value: see [LivePlayerState]. The
+    // same names and values as before, but a play/pause, a buffering blip or a
+    // queue change now re-runs only what reads that field, not this whole
+    // composable — which every PlayerState change used to.
+    val playerHolder = com.music.bitchord.playback.rememberPlayerStateHolder(controller)
+    val player = remember(playerHolder) { com.music.bitchord.playback.LivePlayerState(playerHolder) }
+
+    // The enabled sources and the Home tab strip built from them, collected once
+    // and remembered. Performance: each was rebuilt inline at three call sites on
+    // every recomposition, and a new list instance counts as a changed argument,
+    // so HomeScreen and HomeTabsRow could never skip.
+    val sourceConfigs by com.music.bitchord.data.sources.SourceRegistry.configs.collectAsStateWithLifecycle()
+    val activeSources = remember(sourceConfigs) { sourceConfigs.filter { it.enabled } }
+    val homeSourceTabs = remember(activeSources) {
+        listOf(com.music.bitchord.ui.MainViewModel.HOME_TAB_UNIFIED to "Unified") +
+            activeSources.map { it.id to it.label.ifBlank { it.kind.label } }
+    }
     // A resume in a party is performed on the instant the server schedules, not
     // when it was pressed, and nothing about the player moves in between — so
     // the transport spends that round trip drawn as though the tap never landed.
     // Folded into the buffering flag every play button already answers to, since
     // to a listener the two are the same fact: it is coming, wait.
-    val awaitingPartyStart by ListenTogether.awaitingStart.collectAsStateWithLifecycle()
-    val playPauseBusy = player.isLoading || awaitingPartyStart
+    val awaitingPartyStart = ListenTogether.awaitingStart.collectAsStateWithLifecycle()
+    // Derived and delegated, so it is read wherever it is used — the bars, the
+    // player — rather than here, where a buffering blip would re-run all of
+    // this composable. Same value as before.
+    val playPauseBusy by remember(player, awaitingPartyStart) {
+        derivedStateOf { player.isLoading || awaitingPartyStart.value }
+    }
     // Listening in a party whose host has taken the controls. Read once here
     // and handed to every surface, so the player, the mini player and the glass
     // bar can never disagree about whether this device may drive the music.
@@ -2345,16 +2425,18 @@ private fun BitChordApp(
                         }
                     },
                     modifier = Modifier
-                        .hazeSource(hazeState)
+                        .nestedScroll(homeTabsScroll)
+                        .then(if (playerCoversPage) Modifier else Modifier.hazeSource(hazeState))
                         .then(
                             if (glassActive) {
                                 Modifier
                                     // Not under "reduce dynamic blur": nothing
                                     // samples the layer then, and recording a
                                     // whole page into one for no reader is the
-                                    // cost that setting exists to remove.
+                                    // cost that setting exists to remove. Nor
+                                    // while the player covers the page.
                                     .then(
-                                        if (glassSamplesBackdrop) {
+                                        if (glassSamplesBackdrop && !playerCoversPage) {
                                             Modifier.layerBackdrop(appBackdrop)
                                         } else {
                                             Modifier
@@ -2450,7 +2532,7 @@ private fun BitChordApp(
                     } else if (key == "discord") {
                         DiscordScreen(
                             song = player.song,
-                            positionMs = player.position.positionMs,
+                            positionMs = { player.position.positionMs },
                             durationMs = player.durationMs,
                             onOpenLogin = { showDiscordLogin = true },
                             onOpenDialog = { discordDialog = it },
@@ -2710,14 +2792,12 @@ private fun BitChordApp(
                         )
                     } else when (key.removePrefix(TAB_KEY).toIntOrNull() ?: selectedTab) {
                         TAB_HOME -> {
-                            val activeSources = com.music.bitchord.data.sources.SourceRegistry.configs.collectAsStateWithLifecycle().value.filter { it.enabled }
-                            val tabs = listOf(com.music.bitchord.ui.MainViewModel.HOME_TAB_UNIFIED to "Unified") + activeSources.map { it.id to it.label.ifBlank { it.kind.label } }
                             HomeScreen(
                                 state = homeState,
                                 listState = homeListState,
                                 hazeState = hazeState,
                                 title = stringResource(R.string.listen_now),
-                                tabs = tabs,
+                                tabs = homeSourceTabs,
                                 activeTab = activeHomeTab,
                                 onTabSelect = { viewModel.setHomeTab(it) },
                                 signedIn = signedIn,
@@ -2966,10 +3046,53 @@ private fun BitChordApp(
                     !showSettings && !showAccountScrobbling && !showSources && !showListenTogether && !showEqualizer &&
                     !showReplay && !showDiscord && !showHistory && libraryShowAll == null
                 
-                val activeSourcesCount = com.music.bitchord.data.sources.SourceRegistry.configs.collectAsStateWithLifecycle().value.count { it.enabled }
+                val activeSourcesCount = activeSources.size
                 val hasTabs = selectedTab == TAB_HOME && detail == null && libraryShowAll == null && !showSettings && !showAccountScrobbling && !showSources && !showListenTogether && !showEqualizer && !showReplay && !showDiscord && !showHistory && (1 + activeSourcesCount) > 1
 
-                if (!isSearchVisible) TopFadeBlur(
+                val isReplayVisible = showReplay && !showDiscord && !showHistory &&
+                    !(libraryShowAll != null && detail == null) &&
+                    !showAccountScrobbling && !showSources && !showListenTogether &&
+                    !showEqualizer && !showSettings
+                val chromePageColor = if (isDetailVisible) {
+                    detailPalette.background
+                } else {
+                    MaterialTheme.colorScheme.background
+                }
+                
+                // The flat pane under the bar on ordinary pages with glass off —
+                // except where Home's source tabs are up: the fade band below
+                // ([TopFadeBlur] with [hasTabs]) already runs from the top of
+                // the window down past the tabs, bar included, so a pane over
+                // the same strip would be a second blur pass for nothing.
+                val showsTopBarBlur = !glassActive && !isReplayVisible && !isDetailVisible && !hasTabs
+
+                // With liquid glass, ordinary pages put the whole top section —
+                // status bar, the bar's controls and Home's source tabs — on one
+                // glass surface instead of a glass circle per control. Artwork
+                // pages keep their floating circles over the artwork.
+                val unifiedGlassHeader = glassSamplesBackdrop && !isReplayVisible && !isDetailVisible
+                // Shown again whenever Home's tabs come (back) up or change.
+                LaunchedEffect(hasTabs, activeHomeTab) {
+                    homeTabsOffset.floatValue = 0f
+                    if (!hasTabs) homeTabsTravel.floatValue = 0f
+                }
+
+                // Performance: never both. Where [TopBarBlur]'s pane is up, this
+                // progressive blur was stacked under it over the same strip — a
+                // second full-width Haze pass (~5 ms GPU a frame by its own
+                // measure) that the opaque-ish pane above it mostly hid. On Home
+                // with its source tabs this band is the only one, behind both
+                // the bar and the tabs. The unified glass replaces it altogether.
+                if (unifiedGlassHeader) {
+                    // Runs down behind the tabs, and shortens as they collapse.
+                    com.music.bitchord.ui.components.GlassTopPanel(
+                        height = com.music.bitchord.ui.components.topBarHeight(),
+                        extraPx = {
+                            if (hasTabs) homeTabsTravel.floatValue + homeTabsOffset.floatValue else 0f
+                        },
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
+                } else if (!isSearchVisible && !showsTopBarBlur) TopFadeBlur(
                     hazeState = hazeState,
                     // Replay paints its own full-bleed black backdrop up under the
                     // status bar, exactly as a release page's artwork does.
@@ -2985,11 +3108,12 @@ private fun BitChordApp(
                     },
                     modifier = Modifier.align(Alignment.TopCenter),
                     hasTabs = hasTabs,
+                    tabsOffsetPx = { homeTabsOffset.floatValue },
                 )
 
                 // With Liquid Glass enabled, every page uses separated floating
                 // controls and therefore has no full-width pane underneath.
-                if (!glassActive && !isReplayVisible && !isDetailVisible) {
+                if (showsTopBarBlur) {
                     TopBarBlur(
                         hazeState = hazeState,
                         modifier = Modifier.align(Alignment.TopCenter),
@@ -3017,6 +3141,7 @@ private fun BitChordApp(
                     transparentBackdrop = glassActive || isReplayVisible || isDetailVisible,
                     artworkPageChrome = isReplayVisible || isDetailVisible,
                     backButtonHazeState = hazeState,
+                    unifiedGlass = unifiedGlassHeader,
                     trailingTitle = if (detail != null && detailActiveShelf != null) detail.title else null,
                     // Search has no large in-list header to hand the title back to —
                     // the field takes that space — so its bar title is always up.
@@ -3068,7 +3193,7 @@ private fun BitChordApp(
                                             tint = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.size(14.dp),
                                         )
-                                        Spacer(Modifier.width(4.dp))
+                                        Spacer(Modifier.width(0.dp))
                                         Text(
                                             text = stringResource(R.string.listen_together_ping, state.latencyMs),
                                             style = MaterialTheme.typography.labelMedium,
@@ -3223,13 +3348,30 @@ private fun BitChordApp(
 
                 // Render tabs on top of the TopFadeBlur layer so they aren't hidden/blurred
                 if (hasTabs) {
-                    com.music.bitchord.ui.screens.HomeTabsRow(
-                        tabs = listOf(com.music.bitchord.ui.MainViewModel.HOME_TAB_UNIFIED to "Unified") + com.music.bitchord.data.sources.SourceRegistry.configs.collectAsStateWithLifecycle().value.filter { it.enabled }.map { it.id to it.label.ifBlank { it.kind.label } },
-                        activeTab = activeHomeTab,
-                        onTabSelect = { viewModel.setHomeTab(it) },
-                        topPadding = com.music.bitchord.ui.components.topBarHeight(),
-                        modifier = Modifier.align(Alignment.TopCenter)
-                    )
+                    // Hung from the bar's bottom edge and clipped there, so as the
+                    // tabs slide up they go *under* the bar — neither drawn over
+                    // it nor catching taps meant for it.
+                    Box(
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = com.music.bitchord.ui.components.topBarHeight())
+                            .clipToBounds(),
+                    ) {
+                        com.music.bitchord.ui.screens.HomeTabsRow(
+                            tabs = homeSourceTabs,
+                            activeTab = activeHomeTab,
+                            onTabSelect = { viewModel.setHomeTab(it) },
+                            topPadding = 0.dp,
+                            modifier = Modifier
+                                .onSizeChanged { homeTabsTravel.floatValue = it.height.toFloat() }
+                                .graphicsLayer {
+                                    val travel = homeTabsTravel.floatValue
+                                    val offset = homeTabsOffset.floatValue
+                                    translationY = offset
+                                    alpha = if (travel > 0f) (1f + offset / travel).coerceIn(0f, 1f) else 1f
+                                },
+                        )
+                    }
                 }
 
                 // Drawn before the bars so their own glass reads on top of it.
@@ -3275,24 +3417,37 @@ private fun BitChordApp(
                     // component they are stacked to imitate: the now playing
                     // controls dock into the tab bar rather than riding above it,
                     // and the pair folds together on scroll. See [GlassNavBar].
-                    GlassNavBar(
-                        tabs = tabs,
-                        selectedIndex = selectedTab,
-                        onTabSelected = onTabSelected,
-                        scrollConnection = navBarScroll,
-                        song = player.song,
-                        isPlaying = player.isPlaying,
-                        isLoading = playPauseBusy,
-                        onPlayPause = {
-                            togglePlayPause()
-                        },
-                        onNext = { controller?.seekToNextMediaItem() },
-                        onPrevious = { controller?.seekToPrevious() },
-                        onExpand = { showNowPlaying = true },
-                        controlsLocked = controlsLocked,
-                        onBlockedControl = showHostOnlyNotice,
+                    // Its own recompose scope: the playback state read below
+                    // re-runs this row on play/pause or buffering, not the app.
+                    PlayerReadScope {
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                    )
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GlassNavBar(
+                            tabs = tabs,
+                            selectedIndex = selectedTab,
+                            onTabSelected = onTabSelected,
+                            scrollConnection = navBarScroll,
+                            song = player.song,
+                            isPlaying = player.isPlaying,
+                            isLoading = playPauseBusy,
+                            onPlayPause = {
+                                togglePlayPause()
+                            },
+                            onNext = { controller?.seekToNextMediaItem() },
+                            onPrevious = { controller?.seekToPrevious() },
+                            onExpand = { showNowPlaying = true },
+                            controlsLocked = controlsLocked,
+                            onBlockedControl = showHostOnlyNotice,
+                            modifier = Modifier.weight(1f),
+                        )
+                        PodLauncherButton(
+                            glass = glassActive,
+                            hazeState = hazeState,
+                        )
+                    }
+                    }
                 } else Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -3307,23 +3462,35 @@ private fun BitChordApp(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     QueueActionNoticeHost(queueNotice)
+                    // Its own recompose scope, as the glass bar's above.
+                    PlayerReadScope {
                     player.song?.let { song ->
-                        MiniPlayer(
-                            song = song,
-                            isPlaying = player.isPlaying,
-                            isLoading = playPauseBusy,
-                            hazeState = hazeState,
-                            onPlayPause = {
-                                togglePlayPause()
-                            },
-                            onNext = { controller?.seekToNextMediaItem() },
-                            onPrevious = { controller?.seekToPrevious() },
-                            onExpand = { showNowPlaying = true },
-                            controlsLocked = controlsLocked,
-                            onBlockedControl = showHostOnlyNotice,
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                        )
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MiniPlayer(
+                                song = song,
+                                isPlaying = player.isPlaying,
+                                isLoading = playPauseBusy,
+                                hazeState = hazeState,
+                                onPlayPause = {
+                                    togglePlayPause()
+                                },
+                                onNext = { controller?.seekToNextMediaItem() },
+                                onPrevious = { controller?.seekToPrevious() },
+                                onExpand = { showNowPlaying = true },
+                                controlsLocked = controlsLocked,
+                                onBlockedControl = showHostOnlyNotice,
+                                modifier = Modifier.weight(1f),
+                            )
+                            PodLauncherButton(
+                                glass = glassActive,
+                                hazeState = hazeState,
+                            )
+                        }
                         Spacer(Modifier.height(8.dp))
+                    }
                     }
                     FloatingBottomBar(
                         tabs = tabs,
@@ -3333,6 +3500,8 @@ private fun BitChordApp(
                     )
                 }
             }
+            
+
 
         }
 
@@ -3361,6 +3530,16 @@ private fun BitChordApp(
                 // sheet always spans the full window this app draws it for.
                 sheetMaxWidth = Dp.Unspecified,
             ) {
+                // Covered only once fully up, and uncovered the moment it starts
+                // to go down, so the page is recording again before any of it
+                // is revealed.
+                LaunchedEffect(nowPlayingSheetState) {
+                    snapshotFlow {
+                        nowPlayingSheetState.currentValue == SheetValue.Expanded &&
+                            nowPlayingSheetState.targetValue == SheetValue.Expanded
+                    }.collect { playerCoversPage = it }
+                }
+                DisposableEffect(Unit) { onDispose { playerCoversPage = false } }
                 // Keeps a sheet still "settling" after a lyrics or queue
                 // scroll from taking the next touch meant for that list.
                 Box(Modifier.guardSheetFromContentTouches(nowPlayingSheetState)) {
@@ -4599,3 +4778,15 @@ private const val TAB_SEARCH = 3
  * prefix has to be the one thing both the writing and the reading agree on.
  */
 private const val TAB_KEY = "tab:"
+
+/**
+ * Runs [content] as a recompose scope of its own and emits nothing else, so it
+ * changes no layout. State read inside — the player's, for the bottom bars —
+ * re-runs only [content] when it changes, rather than the caller: inline
+ * layouts like Row and Column share their caller's scope, so a read inside one
+ * of those in [BitChordApp] used to re-run the whole of it.
+ */
+@Composable
+private fun PlayerReadScope(content: @Composable () -> Unit) {
+    content()
+}

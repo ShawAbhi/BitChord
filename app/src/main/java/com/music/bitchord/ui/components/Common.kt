@@ -24,6 +24,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.State
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -332,6 +335,26 @@ fun SongRow(
     /** True while a Downloads row belongs to the current multi-selection. */
     selected: Boolean = false,
 ) {
+    // Rows that can't be swiped (most of them) skip the swipe machinery
+    // entirely — its state, gesture handling and haptics are only set up below.
+    if (onSwipeToQueue == null) {
+        SongRowContent(
+            song = song,
+            onClick = onClick,
+            onLongPress = onLongPress,
+            onMore = onMore ?: onLongPress,
+            modifier = modifier,
+            trackNumber = trackNumber,
+            subtitleColor = subtitleColor,
+            downloadedTint = downloadedTint,
+            isCurrent = isCurrent,
+            isPlaying = isPlaying,
+            activeTint = activeTint,
+            selected = selected,
+        )
+        return
+    }
+
     val haptics = rememberHaptics()
     val swipeStateHolder = remember { mutableStateOf<SwipeToDismissBoxState?>(null) }
     var boxWidth by remember { mutableFloatStateOf(0f) }
@@ -354,23 +377,6 @@ fun SongRow(
     )
     swipeStateHolder.value = swipeState
 
-    if (onSwipeToQueue == null) {
-        SongRowContent(
-            song = song,
-            onClick = onClick,
-            onLongPress = onLongPress,
-            onMore = onMore ?: onLongPress,
-            modifier = modifier,
-            trackNumber = trackNumber,
-            subtitleColor = subtitleColor,
-            downloadedTint = downloadedTint,
-            isCurrent = isCurrent,
-            isPlaying = isPlaying,
-            activeTint = activeTint,
-            selected = selected,
-        )
-        return
-    }
 
     // The row reveals "Queue" from the first pixel of the drag, but it only
     // *commits* past 45% of the width — so without this the label is a promise
@@ -418,10 +424,29 @@ fun SongRow(
     }
 }
 
+/**
+ * [Downloads.saved], collected once at the root and shared by every row.
+ *
+ * Performance: [DownloadedBadge] used to collect it itself, so every song row
+ * on screen ran its own lifecycle-aware collector. Null outside the main app
+ * (another window, a preview), where the badge collects for itself as before.
+ */
+val LocalSavedDownloads = staticCompositionLocalOf<State<Map<String, String>>?> { null }
+
+/** [AppSettings.swipeToPlayNext], shared the same way as [LocalSavedDownloads]. */
+val LocalSwipeToPlayNext = staticCompositionLocalOf<State<Boolean>?> { null }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QueueSwipeBackground(swipeState: SwipeToDismissBoxState) {
-    val playNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
+    // Performance: nothing is composed here until the row is actually being
+    // swiped — every row in every list has one of these behind it.
+    val dragging by remember(swipeState) {
+        derivedStateOf { (try { swipeState.requireOffset() } catch (e: Exception) { 0f }) != 0f }
+    }
+    if (!dragging) return
+    val shared = LocalSwipeToPlayNext.current
+    val playNext = shared?.value ?: AppSettings.swipeToPlayNext.collectAsStateWithLifecycle().value
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -610,7 +635,8 @@ private fun SongRowContent(
  */
 @Composable
 fun DownloadedBadge(videoId: String, tint: Color, modifier: Modifier = Modifier) {
-    val saved by Downloads.saved.collectAsStateWithLifecycle()
+    val shared = LocalSavedDownloads.current
+    val saved = shared?.value ?: Downloads.saved.collectAsStateWithLifecycle().value
     if (videoId !in saved) return
     Spacer(Modifier.width(8.dp))
     Icon(

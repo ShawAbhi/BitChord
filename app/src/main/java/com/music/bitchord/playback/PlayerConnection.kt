@@ -12,6 +12,11 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.runtime.structuralEqualityPolicy
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.State
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
@@ -250,9 +255,20 @@ fun MediaController.setQueueDragActive(active: Boolean) {
 
 /** Mirrors the controller into Compose state, polling position while playing. */
 @Composable
-fun rememberPlayerState(controller: MediaController?): PlayerState {
+fun rememberPlayerState(controller: MediaController?): PlayerState =
+    rememberPlayerStateHolder(controller).value
+
+/**
+ * [rememberPlayerState] without reading it: the [State] itself, for a caller
+ * that wants to decide where the read happens. Nothing in here reads the
+ * state during composition, so calling this invalidates nothing on its own.
+ * See [LivePlayerState].
+ */
+@Composable
+fun rememberPlayerStateHolder(controller: MediaController?): State<PlayerState> {
     val position = remember { PlaybackPosition() }
-    var state by remember { mutableStateOf(PlayerState(position = position)) }
+    val holder = remember { mutableStateOf(PlayerState(position = position)) }
+    var state by holder
 
     DisposableEffect(controller) {
         val player = controller ?: return@DisposableEffect onDispose {}
@@ -341,15 +357,69 @@ fun rememberPlayerState(controller: MediaController?): PlayerState {
     // Nothing is lost by stopping: `sync` above runs on the controller's own
     // events, and the first thing that happens on the way back is a fresh read.
     val foreground = rememberIsForeground()
-    LaunchedEffect(controller, state.isPlaying, foreground) {
-        while (controller != null && state.isPlaying && foreground) {
-            position.positionMs = controller.currentPosition.coerceAtLeast(0L)
-            val duration = controller.duration.coerceAtLeast(0L)
-            if (duration != state.durationMs) state = state.copy(durationMs = duration)
-            delay(500)
+    //
+    // Play state is watched from inside the effect rather than used as one of
+    // its keys: a key is read during composition, which made every play and
+    // pause re-run whatever called this — for the main screen, all of it. The
+    // loop still starts on play and stops on pause, as it did when restarted.
+    LaunchedEffect(controller, foreground) {
+        snapshotFlow { state.isPlaying }.collectLatest { playing ->
+            while (controller != null && playing && foreground) {
+                position.positionMs = controller.currentPosition.coerceAtLeast(0L)
+                val duration = controller.duration.coerceAtLeast(0L)
+                if (duration != state.durationMs) state = state.copy(durationMs = duration)
+                delay(500)
+            }
         }
     }
-    return state
+    return holder
+}
+
+/**
+ * [PlayerState] field by field, each its own derived state.
+ *
+ * Performance: reading a [PlayerState] value invalidates the reader on any
+ * change to any field — a buffering blip, a queue edit, a metadata update.
+ * Through this, a read of [song] is invalidated only when the song changes,
+ * [isPlaying] only on play and pause, and so on; and a read inside a lambda
+ * happens there, not in the composable that built the lambda. The values are
+ * exactly those of the underlying state.
+ */
+@Stable
+class LivePlayerState(private val holder: State<PlayerState>) {
+    private fun <T> field(read: (PlayerState) -> T) =
+        derivedStateOf(structuralEqualityPolicy()) { read(holder.value) }
+
+    private val songState = field { it.song }
+    private val isPlayingState = field { it.isPlaying }
+    private val durationState = field { it.durationMs }
+    private val errorState = field { it.error }
+    private val isLoadingState = field { it.isLoading }
+    private val repeatModeState = field { it.repeatMode }
+    private val queueState = field { it.queue }
+    private val queueIndexState = field { it.queueIndex }
+    private val hasPreviousState = field { it.hasPrevious }
+    private val hasNextState = field { it.hasNext }
+    private val isQualityUpgradedState = field { it.isQualityUpgraded }
+    private val positionState = field { it.position }
+
+    val song: Song? get() = songState.value
+    val isPlaying: Boolean get() = isPlayingState.value
+    /**
+     * The same stable holder as [PlayerState.position]. Through a derived state
+     * like the rest: its identity never changes, so reading it invalidates
+     * nothing — read off [holder] directly it would invalidate on everything.
+     */
+    val position: PlaybackPosition get() = positionState.value
+    val durationMs: Long get() = durationState.value
+    val error: String? get() = errorState.value
+    val isLoading: Boolean get() = isLoadingState.value
+    val repeatMode: Int get() = repeatModeState.value
+    val queue: List<Song> get() = queueState.value
+    val queueIndex: Int get() = queueIndexState.value
+    val hasPrevious: Boolean get() = hasPreviousState.value
+    val hasNext: Boolean get() = hasNextState.value
+    val isQualityUpgraded: Boolean get() = isQualityUpgradedState.value
 }
 
 /**

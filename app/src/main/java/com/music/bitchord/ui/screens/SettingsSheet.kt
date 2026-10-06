@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Animation
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BlurOff
@@ -224,6 +225,7 @@ fun SettingsScreen(
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
     val hideSongStatus by AppSettings.hideSongStatus.collectAsStateWithLifecycle()
     val swipeToPlayNext by AppSettings.swipeToPlayNext.collectAsStateWithLifecycle()
+    val podLockScreen by AppSettings.podLockScreen.collectAsStateWithLifecycle()
     val dontRepeatSuggestions by AppSettings.dontRepeatSuggestions.collectAsStateWithLifecycle()
     val preferMusicOnly by AppSettings.preferMusicOnly.collectAsStateWithLifecycle()
     val smartVersionAlignment by AppSettings.smartVersionAlignment.collectAsStateWithLifecycle()
@@ -1212,6 +1214,29 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setSwipeToPlayNext(!swipeToPlayNext) },
+                )
+            }
+            val podLockScreenTitle = stringResource(R.string.pod_lock_screen)
+            row(podLockScreenTitle, "ipod", "lock screen", "pip") {
+                SettingsRow(
+                    icon = Icons.Rounded.Lock,
+                    title = podLockScreenTitle,
+                    subtitle = if (podLockScreen) {
+                        stringResource(R.string.pod_lock_screen_on)
+                    } else {
+                        stringResource(R.string.pod_lock_screen_off)
+                    },
+                    trailing = {
+                        Switch(
+                            checked = podLockScreen,
+                            onCheckedChange = AppSettings::setPodLockScreen,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setPodLockScreen(!podLockScreen) },
                 )
             }
             val dontRepeatSongsTitle = stringResource(R.string.dont_repeat_songs)

@@ -26,6 +26,9 @@ import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.node.requireGraphicsContext
 import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.util.fastCoerceAtMost
 import com.music.bitchord.ui.components.backdrop.RuntimeShaderCacheImpl
@@ -93,6 +96,15 @@ internal class HighlightNode(
 
     private var prevStyle: HighlightStyle? = null
 
+    /**
+     * What [highlightLayer] was last recorded for. Vendored addition: the rim
+     * is a function of these alone, but upstream re-recorded it — stroke,
+     * blur mask, runtime shader — on every draw, and a glass surface redraws
+     * every frame its backdrop moves. Now it is recorded once per change and
+     * the layer replayed in between.
+     */
+    private var recordedFor: RecordKey? = null
+
     override fun ContentDrawScope.draw() {
         val highlight = highlight()
         if (highlight == null || highlight.width.value <= 0f) {
@@ -121,10 +133,19 @@ internal class HighlightNode(
                     null
                 }
 
-            configurePaint(highlight)
-
             highlightLayer.alpha = highlight.alpha
             highlightLayer.blendMode = highlight.style.blendMode
+            val key = RecordKey(
+                size = size,
+                layoutDirection = layoutDirection,
+                density = density.density,
+                fontScale = density.fontScale,
+                highlight = highlight,
+                shape = shapeProvider.innerShape,
+            )
+            if (key != recordedFor) {
+            recordedFor = key
+            configurePaint(highlight)
             highlightLayer.record(safeSize) {
                 translate(1f, 1f) {
                     val canvas = drawContext.canvas
@@ -133,6 +154,7 @@ internal class HighlightNode(
                     canvas.drawOutline(outline, paint)
                     canvas.restore()
                 }
+            }
             }
 
             translate(-1f, -1f) {
@@ -155,7 +177,17 @@ internal class HighlightNode(
         clipPath = null
         runtimeShaderCache.clear()
         prevStyle = null
+        recordedFor = null
     }
+
+    private data class RecordKey(
+        val size: Size,
+        val layoutDirection: LayoutDirection,
+        val density: Float,
+        val fontScale: Float,
+        val highlight: Highlight,
+        val shape: Shape,
+    )
 
     private fun DrawScope.configurePaint(highlight: Highlight) {
         paint.color = highlight.style.color

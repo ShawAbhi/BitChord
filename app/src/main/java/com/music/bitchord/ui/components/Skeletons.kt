@@ -24,6 +24,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.State
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,29 +68,56 @@ fun ShimmerBox(modifier: Modifier = Modifier, shape: Shape = BlockShape) {
     val highlight = MaterialTheme.colorScheme.onSurfaceVariant
         .copy(alpha = 0.16f)
         .compositeOver(base)
-    val sweep = rememberInfiniteTransition(label = "skeleton").animateFloat(
+    // One sweep shared by every box in the same placeholder row or card (see
+    // [ShimmerGroup]); a box outside one runs its own, as before.
+    val sweep = LocalShimmerSweep.current ?: rememberShimmerSweep()
+    Box(
+        modifier
+            .clip(shape)
+            .drawWithCache {
+                // Performance: the gradient is built once per size and slid
+                // across each frame, rather than rebuilt — a new brush and
+                // shader for every box on every frame — as it used to be.
+                val band = size.width * 0.5f
+                val brush = Brush.horizontalGradient(
+                    colors = listOf(base, highlight, base),
+                    startX = 0f,
+                    endX = band,
+                )
+                onDrawBehind {
+                    // The band travels from fully off one edge to fully off
+                    // the other, which leaves a beat of flat grey between
+                    // passes rather than a highlight parked on the block.
+                    val startX = -band + sweep.value * (size.width + band * 2)
+                    translate(left = startX) {
+                        drawRect(brush, topLeft = Offset(-startX, 0f), size = size)
+                    }
+                }
+            },
+    )
+}
+
+/** The highlight's position across a placeholder, 0 to 1, repeating. */
+@Composable
+private fun rememberShimmerSweep(): State<Float> =
+    rememberInfiniteTransition(label = "skeleton").animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(SHIMMER_PERIOD_MS, easing = LinearEasing)),
         label = "sweep",
     )
-    Box(
-        modifier
-            .clip(shape)
-            .drawWithCache {
-                // The band travels from fully off one edge to fully off the
-                // other, which leaves a beat of flat grey between passes rather
-                // than a highlight permanently parked somewhere on the block.
-                val band = size.width * 0.5f
-                val startX = -band + sweep.value * (size.width + band * 2)
-                val brush = Brush.horizontalGradient(
-                    colors = listOf(base, highlight, base),
-                    startX = startX,
-                    endX = startX + band,
-                )
-                onDrawBehind { drawRect(brush) }
-            },
-    )
+
+/** The sweep the boxes inside a [ShimmerGroup] share. */
+private val LocalShimmerSweep = staticCompositionLocalOf<State<Float>?> { null }
+
+/**
+ * Gives every [ShimmerBox] in [content] one sweep between them. Performance:
+ * each box used to run its own infinite animation — three or four per row, a
+ * dozen rows a screen. Shared, they also shimmer in step, as one row should.
+ */
+@Composable
+private fun ShimmerGroup(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalShimmerSweep provides rememberShimmerSweep(), content = content)
 }
 
 /** A placeholder for one line of text, sized as a fraction of its parent. */
@@ -103,8 +135,10 @@ private fun SkeletonLine(fraction: Float, height: Dp, modifier: Modifier = Modif
  */
 @Composable
 private fun SectionHeaderSkeleton(index: Int = 0) {
+    ShimmerGroup {
     Column(Modifier.padding(horizontal = PAGE_GUTTER, vertical = 10.dp)) {
         SkeletonLine(fraction = TitleWidths[index % TitleWidths.size] * 0.7f, height = 18.dp)
+    }
     }
 }
 
@@ -114,6 +148,7 @@ private fun SectionHeaderSkeleton(index: Int = 0) {
  */
 @Composable
 fun SongRowSkeleton(index: Int = 0, circular: Boolean = false, modifier: Modifier = Modifier) {
+    ShimmerGroup {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -127,6 +162,7 @@ fun SongRowSkeleton(index: Int = 0, circular: Boolean = false, modifier: Modifie
             Spacer(Modifier.height(7.dp))
             SkeletonLine(fraction = SubtitleWidths[index % SubtitleWidths.size], height = 11.dp)
         }
+    }
     }
 }
 
@@ -153,6 +189,7 @@ fun LazyListScope.songListSkeleton(
  */
 @Composable
 private fun HeroShelfSkeleton() {
+    ShimmerGroup {
     Column(Modifier.padding(bottom = 26.dp)) {
         SectionHeaderSkeleton()
         BoxWithConstraints {
@@ -170,6 +207,7 @@ private fun HeroShelfSkeleton() {
                 }
             }
         }
+    }
     }
 }
 
@@ -217,6 +255,7 @@ fun LazyListScope.recentlyPlayedSkeleton(listLayout: Boolean) {
 /** Recents heading plus the adjacent list/grid toggle placeholder. */
 @Composable
 private fun RecentsHeaderSkeleton() {
+    ShimmerGroup {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -229,11 +268,13 @@ private fun RecentsHeaderSkeleton() {
         Spacer(Modifier.width(8.dp))
         ShimmerBox(Modifier.size(32.dp), CircleShape)
     }
+    }
 }
 
 /** The compact carousel of square cards used by every shelf below the first. */
 @Composable
 fun ShelfSkeleton(index: Int = 0, cardWidth: Dp = SHELF_CARD_WIDTH, cardCorner: Dp = 12.dp) {
+    ShimmerGroup {
     Column(Modifier.padding(bottom = 26.dp)) {
         SectionHeaderSkeleton(index = index)
         LazyRow(
@@ -254,6 +295,7 @@ fun ShelfSkeleton(index: Int = 0, cardWidth: Dp = SHELF_CARD_WIDTH, cardCorner: 
                 }
             }
         }
+    }
     }
 }
 
@@ -286,6 +328,7 @@ fun LazyListScope.librarySkeleton() {
 /** The Play / Shuffle pair, which only appears once there is something to play. */
 @Composable
 private fun DetailActionsSkeleton(isArtist: Boolean) {
+    ShimmerGroup {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -299,6 +342,7 @@ private fun DetailActionsSkeleton(isArtist: Boolean) {
         if (!isArtist) {
             ShimmerBox(Modifier.size(50.dp), CircleShape)
         }
+    }
     }
 }
 
@@ -354,6 +398,7 @@ fun LazyListScope.detailSkeleton(isArtist: Boolean) {
 /** The tighter row used inside the artist page's top-songs pager. */
 @Composable
 private fun CompactSongRowSkeleton(index: Int) {
+    ShimmerGroup {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -365,5 +410,6 @@ private fun CompactSongRowSkeleton(index: Int) {
             Spacer(Modifier.height(6.dp))
             SkeletonLine(fraction = SubtitleWidths[index % SubtitleWidths.size], height = 11.dp)
         }
+    }
     }
 }
